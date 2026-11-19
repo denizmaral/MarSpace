@@ -117,8 +117,12 @@ enum TrackpadColumnScrolling {
     struct Shared: Sendable {
         /// The monitors (top left origin) that show a scrolling workspace
         var screens: [Rect] = []
-        /// Windows over the columns that keep their gestures: floating windows, the windows of MarSpace
+        /// Windows over the columns that keep their gestures: the floating windows
         var excluded: [Rect] = []
+        /// The windows of MarSpace that take the mouse (the settings window, the panel of the menu bar), wherever they are
+        /// in the stacking: a gesture over one of them is its own where it's in front, not where the window of another app
+        /// covers it (see ``isOwnWindowInFront(at:of:)``)
+        var ownWindows: [OwnWindow] = []
         /// Exactly these modifiers are held during a gesture that moves columns: e.g. none, or Option
         var modifiers: CGEventFlags = []
         /// The columns move the other way around than macOS scrolls
@@ -127,6 +131,7 @@ enum TrackpadColumnScrolling {
 
         /// A scroll event of the gesture, at `location` with exactly `modifiers` held (see ``ColumnScrollGesture/handle(_:dx:dy:isWanted:)``)
         /// - Parameter isContinuous: from a trackpad (or a Magic Mouse), not from the steps of a mouse wheel
+        /// - Parameter isOwnWindowInFront: asked once at the beginning of a gesture over a window of MarSpace
         mutating func handle(
             _ phase: ColumnScrollGesture.Phase,
             dx: CGFloat,
@@ -134,10 +139,19 @@ enum TrackpadColumnScrolling {
             at location: CGPoint,
             modifiers: CGEventFlags,
             isContinuous: Bool,
+            isOwnWindowInFront: (CGPoint, [OwnWindow]) -> Bool = TrackpadColumnScrolling.isOwnWindowInFront(at:of:),
         ) -> (verdict: ColumnScrollGesture.Verdict, columns: Int) {
-            gesture.handle(phase, dx: isReversed ? -dx : dx, dy: dy, isWanted: isContinuous && modifiers == self.modifiers &&
-                screens.contains { $0.contains(location) } && !excluded.contains { $0.contains(location) })
+            let own = ownWindows
+            return gesture.handle(phase, dx: isReversed ? -dx : dx, dy: dy, isWanted: isContinuous && modifiers == self.modifiers &&
+                screens.contains { $0.contains(location) } && !excluded.contains { $0.contains(location) } &&
+                !(own.contains { $0.rect.contains(location) } && isOwnWindowInFront(location, own)))
         }
+    }
+
+    struct OwnWindow: Sendable, Equatable {
+        let number: Int
+        /// Top left origin
+        let rect: Rect
     }
 
     static let shared = Mutex(Shared())
@@ -173,10 +187,14 @@ enum TrackpadColumnScrolling {
         thread.name = "MarSpace trackpad scrolling"
         thread.qualityOfService = .userInteractive
         thread.start()
-        // A window of MarSpace is in front of the other apps' windows only while MarSpace is active
-        for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
-            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
-                MainActor.assumeIsolated { update() }
+        // The windows of MarSpace that take the gestures: where they are, whether they are on the screen
+        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeOcclusionStateNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { note in
+                let window = note.object as? NSWindow
+                MainActor.assumeIsolated {
+                    // Not the windows that let the mouse through: the focus border moves with every focus change
+                    if window?.ignoresMouseEvents == false { update() }
+                }
             }
         }
         update()
@@ -193,24 +211,24 @@ enum TrackpadColumnScrolling {
             ? globalUnsortedMonitorInfos.map(\.visibleWorkspace).filter { $0.rootTilingContainer.layout == .scrolling }
             : []
         let screens = workspaces.map(\.workspaceMonitorInfo.rect)
-        let excluded = workspaces.flatMap { $0.floatingWindows.compactMap(\.observedFrame) } +
-            ownWindowsInFront(NSApp.windows, isAppActive: NSApp.isActive).map(\.frame.withYAxisFlipped)
+        let excluded = workspaces.flatMap { $0.floatingWindows.compactMap(\.observedFrame) }
+        // Not the windows that let the mouse through: the focus border covers the focused column
+        let own = NSApp.windows.filter { $0.isVisible && !$0.ignoresMouseEvents }
+            .map { OwnWindow(number: $0.windowNumber, rect: $0.frame.withYAxisFlipped) }
         let modifiers = config.trackpadScrollModifiers
         let isReversed = config.reversesTrackpadScrollDirection
         let changed = shared.withLock { shared in
-            defer { (shared.screens, shared.excluded, shared.modifiers, shared.isReversed) = (screens, excluded, modifiers, isReversed) }
+            defer { (shared.screens, shared.excluded, shared.ownWindows, shared.modifiers, shared.isReversed) = (screens, excluded, own, modifiers, isReversed) }
             return shared.screens.isEmpty != screens.isEmpty
         }
         if changed { CGEvent.tapEnable(tap: port, enable: !screens.isEmpty) }
     }
 
-    /// The windows of MarSpace that keep the gestures over the columns: the ones in front of the windows of the other apps.
-    /// A window of the normal level (the settings window) is in front only while MarSpace is the active app: behind the
-    /// windows of another app it would take the gestures over the whole screen. Not the windows that let the mouse
-    /// through (the focus border covers the focused column)
-    @MainActor
-    static func ownWindowsInFront(_ windows: [NSWindow], isAppActive: Bool) -> [NSWindow] {
-        windows.filter { $0.isVisible && !$0.ignoresMouseEvents && (isAppActive || $0.level > .normal) }
+    /// On the thread of the tap, at the beginning of a gesture over a window of MarSpace: the window server tells whether
+    /// it's in front there. The settings window behind the windows of another app would take the gestures over most of the
+    /// screen
+    static func isOwnWindowInFront(at location: CGPoint, of own: [OwnWindow]) -> Bool {
+        AppBundle.isOwnWindowInFront(at: location, ownWindowNumbers: Set(own.map(\.number)))
     }
 
     /// On the thread of the tap
