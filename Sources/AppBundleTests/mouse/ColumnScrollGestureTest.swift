@@ -30,6 +30,34 @@ struct ColumnScrollGestureTest {
         assertEquals(gesture.handle(.changed, dx: 120, dy: 2, isWanted: true).columns, -1)
     }
 
+    /// Settings › General › Reverse direction: the fingers going left bring the columns on the left
+    @Test func testTheDirectionCanBeReversed() {
+        let screen = Rect(topLeftX: 0, topLeftY: 0, width: 1920, height: 1080)
+        let center = CGPoint(x: 960, y: 540)
+        for (isReversed, columns) in [(false, 1), (true, -1)] {
+            var shared = TrackpadColumnScrolling.Shared(screens: [screen], isReversed: isReversed)
+            _ = shared.handle(.began, dx: 0, dy: 0, at: center, modifiers: [], isContinuous: true)
+            assertEquals(shared.handle(.changed, dx: -120, dy: 2, at: center, modifiers: [], isContinuous: true).columns, columns)
+        }
+    }
+
+    /// Only over a scrolling workspace, from a trackpad, with exactly the modifiers of the settings
+    @Test func testTheScreenTheDeviceAndTheModifiersDecide() {
+        let screen = Rect(topLeftX: 0, topLeftY: 0, width: 1920, height: 1080)
+        let floating = Rect(topLeftX: 100, topLeftY: 100, width: 400, height: 300)
+        func columns(at location: CGPoint, modifiers: CGEventFlags = .maskAlternate, isContinuous: Bool = true) -> Int {
+            var shared = TrackpadColumnScrolling.Shared(screens: [screen], excluded: [floating], modifiers: .maskAlternate)
+            _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: modifiers, isContinuous: isContinuous)
+            return shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: modifiers, isContinuous: isContinuous).columns
+        }
+        assertEquals(columns(at: CGPoint(x: 960, y: 540)), 1)
+        assertEquals(columns(at: CGPoint(x: 960, y: 540), modifiers: []), 0)
+        assertEquals(columns(at: CGPoint(x: 960, y: 540), modifiers: [.maskAlternate, .maskShift]), 0)
+        assertEquals(columns(at: CGPoint(x: 960, y: 540), isContinuous: false), 0) // A mouse wheel
+        assertEquals(columns(at: CGPoint(x: 200, y: 200)), 0) // Over a floating window
+        assertEquals(columns(at: CGPoint(x: 2500, y: 540)), 0) // Another monitor
+    }
+
     /// A quick flick is shorter than a column: it moves one anyway
     @Test func testAFlickMovesAColumn() {
         var gesture = ColumnScrollGesture()

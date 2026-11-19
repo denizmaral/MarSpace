@@ -121,7 +121,23 @@ enum TrackpadColumnScrolling {
         var excluded: [Rect] = []
         /// Exactly these modifiers are held during a gesture that moves columns: e.g. none, or Option
         var modifiers: CGEventFlags = []
+        /// The columns move the other way around than macOS scrolls
+        var isReversed = false
         var gesture = ColumnScrollGesture()
+
+        /// A scroll event of the gesture, at `location` with exactly `modifiers` held (see ``ColumnScrollGesture/handle(_:dx:dy:isWanted:)``)
+        /// - Parameter isContinuous: from a trackpad (or a Magic Mouse), not from the steps of a mouse wheel
+        mutating func handle(
+            _ phase: ColumnScrollGesture.Phase,
+            dx: CGFloat,
+            dy: CGFloat,
+            at location: CGPoint,
+            modifiers: CGEventFlags,
+            isContinuous: Bool,
+        ) -> (verdict: ColumnScrollGesture.Verdict, columns: Int) {
+            gesture.handle(phase, dx: isReversed ? -dx : dx, dy: dy, isWanted: isContinuous && modifiers == self.modifiers &&
+                screens.contains { $0.contains(location) } && !excluded.contains { $0.contains(location) })
+        }
     }
 
     static let shared = Mutex(Shared())
@@ -175,8 +191,9 @@ enum TrackpadColumnScrolling {
         let excluded = workspaces.flatMap { $0.floatingWindows.compactMap(\.observedFrame) } +
             NSApp.windows.filter { $0.isVisible && !$0.ignoresMouseEvents }.map(\.frame.withYAxisFlipped)
         let modifiers = config.trackpadScrollModifiers
+        let isReversed = config.reversesTrackpadScrollDirection
         let changed = shared.withLock { shared in
-            defer { (shared.screens, shared.excluded, shared.modifiers) = (screens, excluded, modifiers) }
+            defer { (shared.screens, shared.excluded, shared.modifiers, shared.isReversed) = (screens, excluded, modifiers, isReversed) }
             return shared.screens.isEmpty != screens.isEmpty
         }
         if changed { CGEvent.tapEnable(tap: port, enable: !screens.isEmpty) }
@@ -198,10 +215,7 @@ enum TrackpadColumnScrolling {
         let isContinuous = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
         let location = event.location
         let modifiers = event.flags.intersection([.maskAlternate, .maskCommand, .maskControl, .maskShift])
-        return shared.withLock { shared in
-            shared.gesture.handle(phase, dx: dx, dy: dy, isWanted: isContinuous && modifiers == shared.modifiers &&
-                shared.screens.contains { $0.contains(location) } && !shared.excluded.contains { $0.contains(location) })
-        }
+        return shared.withLock { $0.handle(phase, dx: dx, dy: dy, at: location, modifiers: modifiers, isContinuous: isContinuous) }
     }
 
     /// The columns of the workspace under the mouse move: its most recent window and the windows next to it, like `focus`
