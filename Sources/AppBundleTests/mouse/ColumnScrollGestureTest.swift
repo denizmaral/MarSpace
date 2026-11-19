@@ -36,8 +36,8 @@ struct ColumnScrollGestureTest {
         let center = CGPoint(x: 960, y: 540)
         for (isReversed, columns) in [(false, 1), (true, -1)] {
             var shared = TrackpadColumnScrolling.Shared(screens: [screen], isReversed: isReversed)
-            _ = shared.handle(.began, dx: 0, dy: 0, at: center, modifiers: [], isContinuous: true, isOwnWindowInFront: { false })
-            assertEquals(shared.handle(.changed, dx: -120, dy: 2, at: center, modifiers: [], isContinuous: true, isOwnWindowInFront: { false }).columns, columns)
+            _ = shared.handle(.began, dx: 0, dy: 0, at: center, modifiers: [], isContinuous: true, ownWindowsGeneration: 0, isOwnWindowInFront: false)
+            assertEquals(shared.handle(.changed, dx: -120, dy: 2, at: center, modifiers: [], isContinuous: true, ownWindowsGeneration: 0, isOwnWindowInFront: false)?.columns, columns)
         }
     }
 
@@ -47,8 +47,8 @@ struct ColumnScrollGestureTest {
         let floating = Rect(topLeftX: 100, topLeftY: 100, width: 400, height: 300)
         func columns(at location: CGPoint, modifiers: CGEventFlags = .maskAlternate, isContinuous: Bool = true) -> Int {
             var shared = TrackpadColumnScrolling.Shared(screens: [screen], excluded: [floating], modifiers: .maskAlternate)
-            _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: modifiers, isContinuous: isContinuous, isOwnWindowInFront: { false })
-            return shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: modifiers, isContinuous: isContinuous, isOwnWindowInFront: { false }).columns
+            _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: modifiers, isContinuous: isContinuous, ownWindowsGeneration: 0, isOwnWindowInFront: false)
+            return shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: modifiers, isContinuous: isContinuous, ownWindowsGeneration: 0, isOwnWindowInFront: false)?.columns ?? 0
         }
         assertEquals(columns(at: CGPoint(x: 960, y: 540)), 1)
         assertEquals(columns(at: CGPoint(x: 960, y: 540), modifiers: []), 0)
@@ -64,12 +64,13 @@ struct ColumnScrollGestureTest {
         let screen = Rect(topLeftX: 0, topLeftY: 0, width: 1920, height: 1080)
         let settings = TrackpadColumnScrolling.OwnWindow(number: 7, rect: Rect(topLeftX: 0, topLeftY: 0, width: 800, height: 600))
         let over = CGPoint(x: 400, y: 300)
-        func swipe(at location: CGPoint, inFront: Bool) -> (columns: Int, asked: [TrackpadColumnScrolling.OwnWindow]) {
+        func swipe(at location: CGPoint, inFront: Bool) -> (columns: Int?, asked: [TrackpadColumnScrolling.OwnWindow]) {
             var shared = TrackpadColumnScrolling.Shared(screens: [screen], ownWindows: [settings])
-            let asked = shared.ownWindowsToAsk(.began, at: location)
-            _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: [], isContinuous: true, isOwnWindowInFront: { inFront })
-            assertEquals(shared.ownWindowsToAsk(.changed, at: location), []) // Decided at the beginning
-            return (shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, isOwnWindowInFront: { inFront }).columns, asked)
+            let (asked, generation) = shared.ownWindowsToAsk(.began, at: location)
+            _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: generation, isOwnWindowInFront: inFront)
+            assertEquals(shared.ownWindowsToAsk(.changed, at: location).windows, []) // Decided at the beginning
+            let columns = shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: generation, isOwnWindowInFront: inFront)?.columns
+            return (columns, asked)
         }
         // A part of the settings window that is in front: its own
         assertEquals(swipe(at: over, inFront: true).columns, 0)
@@ -80,6 +81,26 @@ struct ColumnScrollGestureTest {
         let elsewhere = swipe(at: CGPoint(x: 1500, y: 800), inFront: true)
         assertEquals(elsewhere.columns, 1)
         assertEquals(elsewhere.asked, [])
+    }
+
+    /// The settings window moves while the window server is asked (outside the lock): the answer is about the old place,
+    /// the tap asks again
+    @Test func testTheWindowServerIsAskedAgainWhenTheOwnWindowsChangedMeanwhile() {
+        let screen = Rect(topLeftX: 0, topLeftY: 0, width: 1920, height: 1080)
+        let location = CGPoint(x: 1000, y: 300)
+        var shared = TrackpadColumnScrolling.Shared(screens: [screen], ownWindows: [])
+        let (asked, generation) = shared.ownWindowsToAsk(.began, at: location)
+        assertEquals(asked, []) // Not over the settings window yet
+        shared.ownWindows = [TrackpadColumnScrolling.OwnWindow(number: 7, rect: Rect(topLeftX: 600, topLeftY: 0, width: 800, height: 600))]
+        #expect(shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: generation, isOwnWindowInFront: false) == nil)
+        // Asked again: the settings window is in front there, the gesture is its own
+        let again = shared.ownWindowsToAsk(.began, at: location)
+        assertEquals(again.windows.map(\.number), [7])
+        _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: again.generation, isOwnWindowInFront: true)
+        assertEquals(shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: again.generation, isOwnWindowInFront: true)?.columns, 0)
+        // Later events don't decide anything: a change of the windows doesn't matter to them
+        shared.ownWindows = []
+        assertEquals(shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: again.generation, isOwnWindowInFront: true)?.columns, 0)
     }
 
     /// The windows that the window server shows above a window of MarSpace: only the ones of other apps in the normal layer
