@@ -70,8 +70,8 @@ import Common
         focusLogger.info("ffm yields to the focus of \(globalFocus.windowOrNil?.windowId.description ?? "nil", privacy: .public)")
         return
     }
-    // A layout since the check (e.g. a resize) may have moved its column off the screen
-    guard !window.isParkedOffTheScreen else { return }
+    // A layout since the check (e.g. a resize) may have moved its column off the screen, or another workspace is shown
+    guard !window.isWaitingInACorner else { return }
     _ = window.focusWindow()
     window.nativeFocus()
 }
@@ -186,11 +186,12 @@ struct FocusFollowsMouseTracker {
     /// - Returns: the window to focus
     /// - Parameter focusChanges: ``focusChangesByOtherMeans``
     mutating func checked(real: Window?, focused: Window?, focusChanges: UInt, now: ContinuousClock.Instant) -> Window? {
-        // The accessibility API finds the window in front, also a column that waits in the corner of the screen: the tile
-        // of the column at the right edge reaches the corner, the mouse enters it there. It's not on the screen, like no
-        // window that AeroSpace manages: not focused, and not remembered as the window under the mouse (the mouse that
-        // enters it when it's on the screen again focuses it). See ``Window/isParkedOffTheScreen``
-        let real = real?.isParkedOffTheScreen == true ? nil : real
+        // The accessibility API finds the window in front, also one that waits in the bottom right corner of the screen
+        // with a pixel of it on the screen: a column off the screen, a window of a workspace that isn't shown. The tile at
+        // the right edge reaches the corner, the mouse enters it there. Such a window counts as no window that AeroSpace
+        // manages: not focused (the screen would scroll to it, or show its workspace), and not remembered as the window
+        // under the mouse (the mouse that enters it when it's shown focuses it)
+        let real = real?.isWaitingInACorner == true ? nil : real
         let previous: Window?? = isRealWindowKnown ? .some(realWindow) : .none
         realWindow = real
         isRealWindowKnown = true
@@ -225,6 +226,13 @@ extension Workspace {
         rootTilingContainer.appendWindows(at: location, to: &result)
         return result
     }
+}
+
+extension Window {
+    /// Not shown, though a pixel of it is on the screen: a column of a scrolling workspace off the screen
+    /// (``isParkedOffTheScreen``), or a window of a workspace that isn't shown. Both wait in a corner of the screen
+    @MainActor
+    fileprivate var isWaitingInACorner: Bool { isParkedOffTheScreen || nodeWorkspace?.isVisible == false }
 }
 
 extension TreeNode {
