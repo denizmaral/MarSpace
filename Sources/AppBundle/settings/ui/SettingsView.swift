@@ -248,13 +248,17 @@ private struct GeneralPane: View {
                 }
             },
             set: { choice in
+                // One write: a binding read in an action can give the value of the last render, a second write would
+                // undo the first (Floating → Tiles stayed Floating)
+                var value = general
                 switch choice {
                     case .tiles, .accordion:
-                        general.defaultWorkspaceLayout = .tiling
-                        general.defaultRootLayout = choice == .tiles ? .tiles : .accordion
-                    case .scrolling: general.defaultWorkspaceLayout = .scrolling
-                    case .floating: general.defaultWorkspaceLayout = .floating
+                        value.defaultWorkspaceLayout = .tiling
+                        value.defaultRootLayout = choice == .tiles ? .tiles : .accordion
+                    case .scrolling: value.defaultWorkspaceLayout = .scrolling
+                    case .floating: value.defaultWorkspaceLayout = .floating
                 }
+                general = value
             },
         )
     }
@@ -360,7 +364,11 @@ private struct AppearancePane: View {
                 LabeledContent("Between windows") {
                     ValueSlider(value: Binding(
                         get: { appearance.gaps.innerHorizontal },
-                        set: { appearance.gaps.innerHorizontal = $0; appearance.gaps.innerVertical = $0 },
+                        set: { value in
+                            var gaps = appearance.gaps // One write, see GeneralPane.defaultLayout
+                            (gaps.innerHorizontal, gaps.innerVertical) = (value, value)
+                            appearance.gaps = gaps
+                        },
                     ), range: 0 ... 60, unit: "pt")
                 }
                 Toggle("Same gap at every screen edge", isOn: $linksScreenEdges)
@@ -369,10 +377,9 @@ private struct AppearancePane: View {
                         ValueSlider(value: Binding(
                             get: { appearance.gaps.outerTop },
                             set: { value in
-                                appearance.gaps.outerTop = value
-                                appearance.gaps.outerBottom = value
-                                appearance.gaps.outerLeft = value
-                                appearance.gaps.outerRight = value
+                                var gaps = appearance.gaps // One write, see GeneralPane.defaultLayout
+                                (gaps.outerTop, gaps.outerBottom, gaps.outerLeft, gaps.outerRight) = (value, value, value, value)
+                                appearance.gaps = gaps
                             },
                         ), range: 0 ... 60, unit: "pt")
                     }
