@@ -36,8 +36,8 @@ struct ColumnScrollGestureTest {
         let center = CGPoint(x: 960, y: 540)
         for (isReversed, columns) in [(false, 1), (true, -1)] {
             var shared = TrackpadColumnScrolling.Shared(screens: [screen], isReversed: isReversed)
-            _ = shared.handle(.began, dx: 0, dy: 0, at: center, modifiers: [], isContinuous: true)
-            assertEquals(shared.handle(.changed, dx: -120, dy: 2, at: center, modifiers: [], isContinuous: true).columns, columns)
+            _ = shared.handle(.began, dx: 0, dy: 0, at: center, modifiers: [], isContinuous: true, isOwnWindowInFront: { false })
+            assertEquals(shared.handle(.changed, dx: -120, dy: 2, at: center, modifiers: [], isContinuous: true, isOwnWindowInFront: { false }).columns, columns)
         }
     }
 
@@ -47,8 +47,8 @@ struct ColumnScrollGestureTest {
         let floating = Rect(topLeftX: 100, topLeftY: 100, width: 400, height: 300)
         func columns(at location: CGPoint, modifiers: CGEventFlags = .maskAlternate, isContinuous: Bool = true) -> Int {
             var shared = TrackpadColumnScrolling.Shared(screens: [screen], excluded: [floating], modifiers: .maskAlternate)
-            _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: modifiers, isContinuous: isContinuous)
-            return shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: modifiers, isContinuous: isContinuous).columns
+            _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: modifiers, isContinuous: isContinuous, isOwnWindowInFront: { false })
+            return shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: modifiers, isContinuous: isContinuous, isOwnWindowInFront: { false }).columns
         }
         assertEquals(columns(at: CGPoint(x: 960, y: 540)), 1)
         assertEquals(columns(at: CGPoint(x: 960, y: 540), modifiers: []), 0)
@@ -59,29 +59,42 @@ struct ColumnScrollGestureTest {
     }
 
     /// A window of MarSpace keeps the gestures where it's in front: the settings window behind the windows of another app
-    /// would take them over most of the screen. The window server is asked only over one of its windows
+    /// would take them over most of the screen. The window server is asked only when a gesture begins over one of them
     @Test func testOwnWindowsKeepTheGesturesWhereTheyAreInFront() {
         let screen = Rect(topLeftX: 0, topLeftY: 0, width: 1920, height: 1080)
         let settings = TrackpadColumnScrolling.OwnWindow(number: 7, rect: Rect(topLeftX: 0, topLeftY: 0, width: 800, height: 600))
-        func swipe(at location: CGPoint, inFront: Bool) -> (columns: Int, asked: Bool) {
-            var asked = false
-            let isInFront: (CGPoint, [TrackpadColumnScrolling.OwnWindow]) -> Bool = { _, own in
-                asked = true
-                return inFront && own == [settings]
-            }
+        let over = CGPoint(x: 400, y: 300)
+        func swipe(at location: CGPoint, inFront: Bool) -> (columns: Int, asked: [TrackpadColumnScrolling.OwnWindow]) {
             var shared = TrackpadColumnScrolling.Shared(screens: [screen], ownWindows: [settings])
-            _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: [], isContinuous: true, isOwnWindowInFront: isInFront)
-            let columns = shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, isOwnWindowInFront: isInFront).columns
-            return (columns, asked)
+            let asked = shared.ownWindowsToAsk(.began, at: location)
+            _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: [], isContinuous: true, isOwnWindowInFront: { inFront })
+            assertEquals(shared.ownWindowsToAsk(.changed, at: location), []) // Decided at the beginning
+            return (shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, isOwnWindowInFront: { inFront }).columns, asked)
         }
-        // A part of the settings window that is on top: its own
-        assertEquals(swipe(at: CGPoint(x: 400, y: 300), inFront: true).columns, 0)
+        // A part of the settings window that is in front: its own
+        assertEquals(swipe(at: over, inFront: true).columns, 0)
+        assertEquals(swipe(at: over, inFront: true).asked, [settings])
         // Covered by the window of another app: the columns move
-        assertEquals(swipe(at: CGPoint(x: 400, y: 300), inFront: false).columns, 1)
-        // Beyond the settings window: the window server isn't asked
+        assertEquals(swipe(at: over, inFront: false).columns, 1)
+        // Beyond the settings window: nothing to ask the window server
         let elsewhere = swipe(at: CGPoint(x: 1500, y: 800), inFront: true)
         assertEquals(elsewhere.columns, 1)
-        assertEquals(elsewhere.asked, false)
+        assertEquals(elsewhere.asked, [])
+    }
+
+    /// The windows that the window server shows above a window of MarSpace: only the ones of other apps in the normal layer
+    /// cover it
+    @Test func testWhatCoversAWindowOfMarSpace() {
+        let location = CGPoint(x: 400, y: 300)
+        let terminal = WindowAbove(isOwn: false, layer: 0, bounds: CGRect(x: 0, y: 0, width: 960, height: 1080))
+        let elsewhere = WindowAbove(isOwn: false, layer: 0, bounds: CGRect(x: 960, y: 0, width: 960, height: 1080))
+        let dock = WindowAbove(isOwn: false, layer: 20, bounds: CGRect(x: 0, y: 0, width: 1920, height: 1080))
+        let focusBorder = WindowAbove(isOwn: true, layer: 0, bounds: CGRect(x: 0, y: 0, width: 960, height: 1080))
+        #expect(isInFront(at: location, windowsAbove: [])) // Nothing above it
+        #expect(!isInFront(at: location, windowsAbove: [terminal]))
+        #expect(!isInFront(at: location, windowsAbove: [focusBorder, dock, terminal]))
+        #expect(isInFront(at: location, windowsAbove: [elsewhere])) // Not at the location
+        #expect(isInFront(at: location, windowsAbove: [dock, focusBorder])) // Another layer, MarSpace's own window
     }
 
     /// A quick flick is shorter than a column: it moves one anyway

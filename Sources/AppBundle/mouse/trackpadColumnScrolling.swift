@@ -131,7 +131,8 @@ enum TrackpadColumnScrolling {
 
         /// A scroll event of the gesture, at `location` with exactly `modifiers` held (see ``ColumnScrollGesture/handle(_:dx:dy:isWanted:)``)
         /// - Parameter isContinuous: from a trackpad (or a Magic Mouse), not from the steps of a mouse wheel
-        /// - Parameter isOwnWindowInFront: asked once at the beginning of a gesture over a window of MarSpace
+        /// - Parameter isOwnWindowInFront: whether one of `ownWindowsToAsk` is in front at the location, asked only when a
+        ///   gesture begins over one of them
         mutating func handle(
             _ phase: ColumnScrollGesture.Phase,
             dx: CGFloat,
@@ -139,12 +140,19 @@ enum TrackpadColumnScrolling {
             at location: CGPoint,
             modifiers: CGEventFlags,
             isContinuous: Bool,
-            isOwnWindowInFront: (CGPoint, [OwnWindow]) -> Bool = TrackpadColumnScrolling.isOwnWindowInFront(at:of:),
+            isOwnWindowInFront: () -> Bool,
         ) -> (verdict: ColumnScrollGesture.Verdict, columns: Int) {
             let own = ownWindows
             return gesture.handle(phase, dx: isReversed ? -dx : dx, dy: dy, isWanted: isContinuous && modifiers == self.modifiers &&
                 screens.contains { $0.contains(location) } && !excluded.contains { $0.contains(location) } &&
-                !(own.contains { $0.rect.contains(location) } && isOwnWindowInFront(location, own)))
+                !(own.contains { $0.rect.contains(location) } && isOwnWindowInFront()))
+        }
+
+        /// The windows of MarSpace to ask the window server about for an event at `location`: the ones there, when the
+        /// event can begin a gesture. Usually none: nothing to ask
+        func ownWindowsToAsk(_ phase: ColumnScrollGesture.Phase, at location: CGPoint) -> [OwnWindow] {
+            guard phase == .began || phase == .changed && gesture.state == .idle else { return [] }
+            return ownWindows.filter { $0.rect.contains(location) }
         }
     }
 
@@ -224,12 +232,6 @@ enum TrackpadColumnScrolling {
         if changed { CGEvent.tapEnable(tap: port, enable: !screens.isEmpty) }
     }
 
-    /// On the thread of the tap, at the beginning of a gesture over a window of MarSpace: the window server tells whether
-    /// it's in front there. The settings window behind the windows of another app would take the gestures over most of the
-    /// screen
-    static func isOwnWindowInFront(at location: CGPoint, of own: [OwnWindow]) -> Bool {
-        AppBundle.isOwnWindowInFront(at: location, ownWindowNumbers: Set(own.map(\.number)))
-    }
 
     /// On the thread of the tap
     fileprivate static func handle(_ event: CGEvent) -> (verdict: ColumnScrollGesture.Verdict, columns: Int) {
@@ -247,7 +249,14 @@ enum TrackpadColumnScrolling {
         let isContinuous = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
         let location = event.location
         let modifiers = event.flags.intersection([.maskAlternate, .maskCommand, .maskControl, .maskShift])
-        return shared.withLock { $0.handle(phase, dx: dx, dy: dy, at: location, modifiers: modifiers, isContinuous: isContinuous) }
+        // At the beginning of a gesture over a window of MarSpace, the window server tells whether it's in front there (the
+        // settings window behind the windows of another app would take the gestures over most of the screen). Asked
+        // outside the lock: the main actor writes the state meanwhile
+        let own = shared.withLock { $0.ownWindowsToAsk(phase, at: location) }
+        let isOwnWindowInFront = !own.isEmpty && isOwnWindowInFront(at: location, ownWindowNumbers: own.lazy.map(\.number))
+        return shared.withLock {
+            $0.handle(phase, dx: dx, dy: dy, at: location, modifiers: modifiers, isContinuous: isContinuous, isOwnWindowInFront: { isOwnWindowInFront })
+        }
     }
 
     /// The columns of the workspace under the mouse move: its most recent window and the windows next to it, like `focus`
