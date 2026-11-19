@@ -27,7 +27,7 @@ final class FocusBorderController {
     /// The window and the panel frame for which the panel was found right below the window, and nothing happened since
     /// that can restack the windows (see ``stackingMayHaveChanged()``): the window server isn't asked again. Most
     /// refresh sessions (a command, a shortcut, a click) change neither the focus, nor the frame, nor the stacking
-    private var verifiedStacking: (window: UInt32, frame: CGRect)? = nil
+    private var verifiedStacking: (window: UInt32, frame: CGRect, placement: FocusBorderPlacement)? = nil
 
     // periphery:ignore - the properties are only compared (Equatable)
     private struct Appearance: Equatable {
@@ -52,19 +52,25 @@ final class FocusBorderController {
               !MissionControl.isActive,
               let window = globalFocus.windowOrNil as? MacWindow,
               let nativeWindowId = window.macApp.nativeWindowId(of: window.windowId),
-              let windowRect = window.focusBorderRect
-                  .map({ focusBorderWindowRect($0, monitor: window.nodeMonitorInfo?.rect, borderWidth: border.width) }),
-              windowRect.width > 0, windowRect.height > 0
+              let windowFrame = window.focusBorderRect
         else { return hide() }
+        let windowRect = focusBorderWindowRect(windowFrame, monitor: window.nodeMonitorInfo?.rect, borderWidth: border.width)
+        guard windowRect.width > 0, windowRect.height > 0 else { return hide() }
         let panel = getOrCreatePanel()
         let frame = focusBorderPanelFrame(windowRect: windowRect, borderWidth: border.width, mainMonitorHeight: mainMonitorInfo.height)
-        let isVerified = !isStackingRecheck && panel.isVisible &&
-            verifiedStacking.map { $0.window == nativeWindowId && $0.frame == frame } == true
-        let stacking = isVerified
-            ? .onScreen(isPanelRightBelow: true)
-            : windowStacking(of: nativeWindowId, pid: window.macApp.pid, panel: panel.isVisible ? CGWindowID(panel.windowNumber) : nil)
-        if stacking == .offScreen { return hide() }
-        verifiedStacking = stacking == .onScreen(isPanelRightBelow: true) ? (nativeWindowId, frame) : nil
+        let verified = isStackingRecheck || !panel.isVisible
+            ? nil
+            : verifiedStacking.flatMap { $0.window == nativeWindowId && $0.frame == frame ? $0.placement : nil }
+        let stacking = verified.map { .onScreen($0, isPanelInPlace: true) } ?? windowStacking(
+            of: nativeWindowId,
+            pid: window.macApp.pid,
+            panel: panel.isVisible ? CGWindowID(panel.windowNumber) : nil,
+            windowFrame: CGRect(x: windowFrame.topLeftX, y: windowFrame.topLeftY, width: windowFrame.width, height: windowFrame.height),
+            // A window beyond the edge of the monitor: the border follows the edge, over the window
+            isBorderOverTheWindow: windowRect != windowFrame,
+        )
+        guard case .onScreen(let placement, let isPanelInPlace) = stacking else { return hide() }
+        verifiedStacking = isPanelInPlace ? (nativeWindowId, frame, placement) : nil
 
         let appearance = Appearance(size: frame.size, border: border)
         if drawnAppearance != appearance {
@@ -74,11 +80,10 @@ final class FocusBorderController {
         if panel.frame != frame {
             panel.setFrame(frame, display: false)
         }
-        // The panel must be right below the window: the border is outside of the window, it shows in the gap, and the
-        // windows of the other apps behind the window are behind the panel too. The window server raises the window of a
+        // The panel must be right next to the window (see FocusBorderPlacement). The window server raises the window of a
         // newly activated app asynchronously: checked once more a moment later, the raise may still be under way
-        if stacking != .onScreen(isPanelRightBelow: true) {
-            panel.order(.below, relativeTo: Int(nativeWindowId))
+        if !isPanelInPlace {
+            panel.order(placement == .below ? .below : .above, relativeTo: Int(nativeWindowId))
             if !isStackingRecheck {
                 stackingRecheck?.cancel()
                 stackingRecheck = Task.startUnstructured { @MainActor in
@@ -149,38 +154,90 @@ final class FocusBorderController {
     }
 }
 
-/// Where the focused window is in the stacking of the window server. One query, no accessibility calls
+/// Where the border panel goes in the stacking of the window server
+enum FocusBorderPlacement: Equatable {
+    /// Right below the focused window: the border shows in the gap around the window, and nothing of MarSpace covers the
+    /// window. macOS hides the buttons of a secure dialog (the purchase sheet of App Store, a password or permission
+    /// prompt) while a window of another app is over it
+    case below
+    /// Right above the focused window: the border is over the window where the window reaches beyond the edge of the
+    /// monitor (it follows the edge there). Only while nothing covers the window: a dialog or a sheet over it keeps its
+    /// buttons, the border goes below
+    case above
+}
+
+/// A window of the window server next to the focused window
+struct StackedWindow: Equatable {
+    let number: Int?
+    let pid: Int32?
+    let layer: Int?
+    /// Top left origin
+    let bounds: CGRect?
+
+    init(number: Int?, pid: Int32?, layer: Int?, bounds: CGRect? = nil) {
+        (self.number, self.pid, self.layer, self.bounds) = (number, pid, layer, bounds)
+    }
+
+    fileprivate init(_ info: [String: Any]) {
+        self.init(
+            number: info[kCGWindowNumber as String] as? Int,
+            pid: info[kCGWindowOwnerPID as String] as? Int32,
+            layer: info[kCGWindowLayer as String] as? Int,
+            bounds: (info[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) },
+        )
+    }
+}
+
+/// - Parameter windowsAbove: the windows above the focused window, from the window up
+func focusBorderPlacement(isBorderOverTheWindow: Bool, windowsAbove: [StackedWindow], windowFrame: CGRect, panel: CGWindowID?) -> FocusBorderPlacement {
+    guard isBorderOverTheWindow else { return .below }
+    let isCovered = windowsAbove.contains { window in
+        window.number != panel.map(Int.init) && window.layer == 0 && window.bounds?.intersects(windowFrame) == true
+    }
+    return isCovered ? .below : .above
+}
+
+/// Where the focused window is in the stacking of the window server. No accessibility calls
 private enum WindowStacking: Equatable {
     /// Not on the active macOS Space, e.g. a window of the desktop while a native fullscreen window has its own Space:
     /// AeroSpace may focus one of them, and the panel (it moves to the active Space) drew its border over the fullscreen
     /// window
     case offScreen
-    /// - Parameter isPanelRightBelow: the panel is below the window, and no window of another app is between them (an app
-    ///   may keep its own helper window right below its window)
-    case onScreen(isPanelRightBelow: Bool)
+    /// - Parameter isPanelInPlace: the panel is right next to the window as `placement` says, no window of another app
+    ///   is between them (an app may keep its own helper window right next to its window)
+    case onScreen(FocusBorderPlacement, isPanelInPlace: Bool)
     /// The query failed
     case unknown
 }
 
-private func windowStacking(of nativeWindowId: UInt32, pid: pid_t, panel: CGWindowID?) -> WindowStacking {
-    let infos = CGWindowListCopyWindowInfo([.optionOnScreenBelowWindow, .optionIncludingWindow], CGWindowID(nativeWindowId))
+private func windowStacking(
+    of nativeWindowId: UInt32,
+    pid: pid_t,
+    panel: CGWindowID?,
+    windowFrame: CGRect,
+    isBorderOverTheWindow: Bool,
+) -> WindowStacking {
+    let infos = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .optionIncludingWindow], CGWindowID(nativeWindowId))
         as? [[String: Any]] ?? []
-    guard let own = infos.first else { return .unknown }
-    // Front to back: the window itself, then the windows behind it. A window of another Space isn't listed
+    guard let own = infos.last else { return .unknown }
+    // Front to back: the windows in front of the window, then the window itself. A window of another Space isn't listed
     guard (own[kCGWindowNumber as String] as? Int) == Int(nativeWindowId) else { return .offScreen }
-    return .onScreen(isPanelRightBelow: isPanelRightBelow(
-        infos.dropFirst().map { ($0[kCGWindowNumber as String] as? Int, $0[kCGWindowOwnerPID as String] as? Int32, $0[kCGWindowLayer as String] as? Int) },
-        pid: pid,
-        panel: panel,
-    ))
+    let windowsAbove = infos.dropLast().reversed().map(StackedWindow.init) // From the window up
+    let placement = focusBorderPlacement(isBorderOverTheWindow: isBorderOverTheWindow, windowsAbove: windowsAbove, windowFrame: windowFrame, panel: panel)
+    let windowsNext = switch placement {
+        case .above: windowsAbove
+        case .below: (CGWindowListCopyWindowInfo([.optionOnScreenBelowWindow], CGWindowID(nativeWindowId)) as? [[String: Any]] ?? [])
+        .map(StackedWindow.init)
+    }
+    return .onScreen(placement, isPanelInPlace: isPanelRightNext(to: windowsNext, pid: pid, panel: panel))
 }
 
-/// - Parameter windowsBelow: number, owner and layer of the windows behind the window, front to back
-/// - Returns: the panel is the first window behind the window, apart from the window's own app (an app may keep a helper
-///   window right below its window). Only the normal layer counts (not the desktop)
-func isPanelRightBelow(_ windowsBelow: [(number: Int?, pid: Int32?, layer: Int?)], pid: pid_t, panel: CGWindowID?) -> Bool {
+/// - Parameter windows: the windows next to the window on the side of the panel, nearest first
+/// - Returns: the panel is the nearest of them, apart from the window's own app (an app may keep a helper window right
+///   next to its window). Only the normal layer counts (not the desktop, the menu bar or the Dock)
+func isPanelRightNext(to windows: [StackedWindow], pid: pid_t, panel: CGWindowID?) -> Bool {
     guard let panel else { return false }
-    for window in windowsBelow where window.layer == 0 {
+    for window in windows where window.layer == 0 {
         if window.number == Int(panel) { return true }
         if window.pid != pid { return false }
     }

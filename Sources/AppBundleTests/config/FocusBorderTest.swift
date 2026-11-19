@@ -45,21 +45,32 @@ struct FocusBorderTest {
         )
     }
 
-    /// The panel is right below the focused window: nothing of MarSpace covers the window (macOS hides the buttons of a
-    /// secure dialog, e.g. the purchase sheet of App Store, while a window of another app is over it)
-    @Test func testThePanelIsRightBelowTheWindow() {
+    /// The panel is right next to the focused window, apart from the app's own helper windows
+    @Test func testThePanelIsRightNextToTheWindow() {
         let app: Int32 = 100
         let other: Int32 = 200
         let panel: CGWindowID = 9
-        #expect(isPanelRightBelow([(9, 1, 0)], pid: app, panel: panel))
-        // A helper window of the app between them, the desktop doesn't count
-        #expect(isPanelRightBelow([(5, app, 0), (9, 1, 0)], pid: app, panel: panel))
-        // A window of another app between them covers the border
-        #expect(!isPanelRightBelow([(6, other, 0), (9, 1, 0)], pid: app, panel: panel))
-        // Other layers (the menu bar, the Dock) don't count
-        #expect(isPanelRightBelow([(7, other, 20), (9, 1, 0)], pid: app, panel: panel))
-        // Not below the window at all, or not shown
-        #expect(!isPanelRightBelow([(6, other, 0)], pid: app, panel: panel))
-        #expect(!isPanelRightBelow([(9, 1, 0)], pid: app, panel: nil))
+        let border = StackedWindow(number: 9, pid: 1, layer: 0)
+        #expect(isPanelRightNext(to: [border], pid: app, panel: panel))
+        #expect(isPanelRightNext(to: [StackedWindow(number: 5, pid: app, layer: 0), border], pid: app, panel: panel)) // A helper window of the app
+        #expect(!isPanelRightNext(to: [StackedWindow(number: 6, pid: other, layer: 0), border], pid: app, panel: panel)) // It would cover the border
+        #expect(isPanelRightNext(to: [StackedWindow(number: 7, pid: other, layer: 20), border], pid: app, panel: panel)) // The Dock doesn't count
+        #expect(!isPanelRightNext(to: [StackedWindow(number: 6, pid: other, layer: 0)], pid: app, panel: panel))
+        #expect(!isPanelRightNext(to: [border], pid: app, panel: nil)) // Not shown
+    }
+
+    /// The panel is below the focused window: nothing of MarSpace covers the window (macOS hides the buttons of a secure
+    /// dialog, e.g. the purchase sheet of App Store, while a window of another app is over it). Above only where the window
+    /// reaches beyond the monitor (the border follows the edge, over the window), and only while nothing covers the window
+    @Test func testTheBorderGoesOverTheWindowOnlyWhereItMustAndNothingCoversIt() {
+        let window = CGRect(x: 905, y: 49, width: 1000, height: 1110)
+        let panel: CGWindowID = 9
+        let dialog = StackedWindow(number: 5, pid: 100, layer: 0, bounds: CGRect(x: 1200, y: 400, width: 400, height: 300))
+        let elsewhere = StackedWindow(number: 6, pid: 200, layer: 0, bounds: CGRect(x: 0, y: 49, width: 895, height: 1110))
+        let border = StackedWindow(number: 9, pid: 1, layer: 0, bounds: window.insetBy(dx: -4, dy: -4))
+        assertEquals(focusBorderPlacement(isBorderOverTheWindow: false, windowsAbove: [], windowFrame: window, panel: panel), .below)
+        assertEquals(focusBorderPlacement(isBorderOverTheWindow: true, windowsAbove: [], windowFrame: window, panel: panel), .above)
+        assertEquals(focusBorderPlacement(isBorderOverTheWindow: true, windowsAbove: [border, elsewhere], windowFrame: window, panel: panel), .above)
+        assertEquals(focusBorderPlacement(isBorderOverTheWindow: true, windowsAbove: [border, dialog], windowFrame: window, panel: panel), .below)
     }
 }
