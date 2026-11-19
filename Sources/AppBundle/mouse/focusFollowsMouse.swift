@@ -202,6 +202,9 @@ struct FocusFollowsMouseTracker {
     /// which fills the workspace, on its way from the Dock to a small floating window in front of it. A click or a shortcut
     /// focuses the tiling window. Like Hyprland's `float_switch_override_focus = 0`, only where the windows overlap
     static func mayFocus(_ window: Window, from focused: Window?) -> Bool {
+        // The accessibility API finds the window in front at the corner, also a column that waits there: the tile of the
+        // column at the right edge reaches the corner, the mouse enters it there (see ``Window/isParkedOffTheScreen``)
+        if window.isParkedOffTheScreen { return false }
         guard let focused, focused.isFloating, !window.isFloating,
               let floatingFrame = focused.observedFrame, let frame = window.observedFrame
         else { return true }
@@ -220,21 +223,12 @@ extension Workspace {
     }
 }
 
-extension Window {
-    /// A tiling window without a tile: a column of a scrolling workspace that is off the screen. It waits in the bottom
-    /// right corner of the screen with a pixel of it on the screen (see ``Layout/scrolling``), its observed frame is
-    /// there: the mouse that passes the corner, next to the Dock, must not focus it (the screen would scroll to it). A
-    /// fullscreen window has no tile either, it fills the screen
-    @MainActor
-    fileprivate var isParkedOffTheScreen: Bool {
-        parent is TilingContainer && lastAppliedLayoutPhysicalRect == nil && !isFullscreen
-    }
-}
-
 extension TreeNode {
     @MainActor
     fileprivate func appendWindows(at location: CGPoint, to result: inout [Window]) {
         if let window = self as? Window {
+            // A column off the screen: its observed frame is in the corner, the mouse that passes there must not focus it (the
+            // screen would scroll to it)
             guard window.lifeStatus.isInhabited, !window.isParkedOffTheScreen else { return }
             if (window.observedFrame ?? window.lastAppliedLayoutPhysicalRect)?.contains(location) == true {
                 result.append(window)

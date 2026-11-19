@@ -83,6 +83,12 @@ struct ScrollingLayoutTest {
 
         assertEquals(workspace.windowsUnderMouse(corner), [])
         assertEquals(workspace.windowsUnderMouse(CGPoint(x: 100, y: 100)), [first])
+        // The mouse enters the column on the right (its tile reaches the corner), the accessibility API finds the window
+        // in front there: the column that waits in the corner. It isn't focused
+        let second = root.children[1] as! Window
+        var tracker = FocusFollowsMouseTracker()
+        assertEquals(tracker.mouseMoved(over: [second], focused: first, focusChanges: 0, now: .now, frontmost: { nil }), .enter)
+        assertEquals(tracker.checked(real: third, focused: first, focusChanges: 0, now: .now), nil)
 
         // On the screen again: the mouse finds it
         #expect(third.focusWindow())
