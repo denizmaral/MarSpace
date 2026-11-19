@@ -27,7 +27,7 @@ final class FocusBorderController {
     /// The window and the panel frame for which the panel was found right below the window, and nothing happened since
     /// that can restack the windows (see ``stackingMayHaveChanged()``): the window server isn't asked again. Most
     /// refresh sessions (a command, a shortcut, a click) change neither the focus, nor the frame, nor the stacking
-    private var verifiedStacking: (window: UInt32, frame: CGRect, placement: FocusBorderPlacement)? = nil
+    private var verifiedStacking: (window: UInt32, windowFrame: Rect, frame: CGRect, placement: FocusBorderPlacement)? = nil
 
     // periphery:ignore - the properties are only compared (Equatable)
     private struct Appearance: Equatable {
@@ -60,7 +60,8 @@ final class FocusBorderController {
         let frame = focusBorderPanelFrame(windowRect: windowRect, borderWidth: border.width, mainMonitorHeight: mainMonitorInfo.height)
         let verified = isStackingRecheck || !panel.isVisible
             ? nil
-            : verifiedStacking.flatMap { $0.window == nativeWindowId && $0.frame == frame ? $0.placement : nil }
+            // The placement depends on the window frame too, not only on the panel frame (see focusBorderPlacement)
+            : verifiedStacking.flatMap { $0.window == nativeWindowId && $0.windowFrame == windowFrame && $0.frame == frame ? $0.placement : nil }
         let stacking = verified.map { .onScreen($0, isPanelInPlace: true) } ?? windowStacking(
             of: nativeWindowId,
             pid: window.macApp.pid,
@@ -70,7 +71,7 @@ final class FocusBorderController {
             isBorderOverTheWindow: windowRect != windowFrame,
         )
         guard case .onScreen(let placement, let isPanelInPlace) = stacking else { return hide() }
-        verifiedStacking = isPanelInPlace ? (nativeWindowId, frame, placement) : nil
+        verifiedStacking = isPanelInPlace ? (nativeWindowId, windowFrame, frame, placement) : nil
 
         let appearance = Appearance(size: frame.size, border: border)
         if drawnAppearance != appearance {
@@ -217,17 +218,17 @@ private func windowStacking(
     windowFrame: CGRect,
     isBorderOverTheWindow: Bool,
 ) -> WindowStacking {
-    let infos = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .optionIncludingWindow], CGWindowID(nativeWindowId))
-        as? [[String: Any]] ?? []
-    guard let own = infos.last else { return .unknown }
-    // Front to back: the windows in front of the window, then the window itself. A window of another Space isn't listed
-    guard (own[kCGWindowNumber as String] as? Int) == Int(nativeWindowId) else { return .offScreen }
-    let windowsAbove = infos.dropLast().reversed().map(StackedWindow.init) // From the window up
-    let placement = focusBorderPlacement(isBorderOverTheWindow: isBorderOverTheWindow, windowsAbove: windowsAbove, windowFrame: windowFrame, panel: panel)
+    // One snapshot, front to back. A window of another Space isn't listed
+    let infos = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+    if infos.isEmpty { return .unknown }
+    guard let index = infos.firstIndex(where: { ($0[kCGWindowNumber as String] as? Int) == Int(nativeWindowId) }) else { return .offScreen }
+    let windowsAbove = { infos[..<index].reversed().map(StackedWindow.init) } // From the window up
+    let placement = isBorderOverTheWindow
+        ? focusBorderPlacement(isBorderOverTheWindow: true, windowsAbove: windowsAbove(), windowFrame: windowFrame, panel: panel)
+        : .below
     let windowsNext = switch placement {
-        case .above: windowsAbove
-        case .below: (CGWindowListCopyWindowInfo([.optionOnScreenBelowWindow], CGWindowID(nativeWindowId)) as? [[String: Any]] ?? [])
-        .map(StackedWindow.init)
+        case .above: windowsAbove()
+        case .below: infos[(index + 1)...].map(StackedWindow.init) // From the window down
     }
     return .onScreen(placement, isPanelInPlace: isPanelRightNext(to: windowsNext, pid: pid, panel: panel))
 }
