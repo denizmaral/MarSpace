@@ -70,6 +70,26 @@ struct ScrollingLayoutTest {
         assertEquals(second.lastAppliedLayoutPhysicalRect, rect(0, 960))
     }
 
+    /// A column off the screen waits in the corner with a pixel of it on the screen, next to the Dock: the mouse that passes
+    /// there doesn't focus it, the screen would scroll to it
+    @Test func testTheMouseIgnoresAColumnInTheCorner() async throws {
+        let (workspace, root) = scrollingWorkspace()
+        let first = TestWindow.new(id: 1, parent: root)
+        TestWindow.new(id: 2, parent: root)
+        let third = TestWindow.new(id: 3, parent: root)
+        #expect(first.focusWindow())
+        try await workspace.layoutWorkspace()
+        assertEquals(third.observedFrame?.topLeftCorner, corner)
+
+        assertEquals(workspace.windowsUnderMouse(corner), [])
+        assertEquals(workspace.windowsUnderMouse(CGPoint(x: 100, y: 100)), [first])
+
+        // On the screen again: the mouse finds it
+        #expect(third.focusWindow())
+        try await workspace.layoutWorkspace()
+        assertEquals(workspace.windowsUnderMouse(CGPoint(x: 1800, y: 100)), [third])
+    }
+
     @Test func testAResizedColumnKeepsTheOthersAsTheyAre() async throws {
         let (workspace, root) = scrollingWorkspace()
         let first = TestWindow.new(id: 1, parent: root)
