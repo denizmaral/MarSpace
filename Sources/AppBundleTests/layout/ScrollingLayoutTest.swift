@@ -89,6 +89,13 @@ struct ScrollingLayoutTest {
         var tracker = FocusFollowsMouseTracker()
         assertEquals(tracker.mouseMoved(over: [second], focused: first, focusChanges: 0, now: .now, frontmost: { nil }), .enter)
         assertEquals(tracker.checked(real: third, focused: first, focusChanges: 0, now: .now), nil)
+        // It isn't remembered as the window under the mouse: on the screen again (the columns fit now), the mouse that
+        // enters it focuses it
+        config.scrollingColumnWidth = 0.25
+        try await workspace.layoutWorkspace()
+        assertEquals(third.isParkedOffTheScreen, false)
+        assertEquals(tracker.mouseMoved(over: [third], focused: first, focusChanges: 0, now: .now, frontmost: { third }), .enter)
+        assertEquals(tracker.checked(real: third, focused: first, focusChanges: 0, now: .now), third)
 
         // On the screen again: the mouse finds it
         #expect(third.focusWindow())

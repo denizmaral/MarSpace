@@ -186,6 +186,11 @@ struct FocusFollowsMouseTracker {
     /// - Returns: the window to focus
     /// - Parameter focusChanges: ``focusChangesByOtherMeans``
     mutating func checked(real: Window?, focused: Window?, focusChanges: UInt, now: ContinuousClock.Instant) -> Window? {
+        // The accessibility API finds the window in front, also a column that waits in the corner of the screen: the tile
+        // of the column at the right edge reaches the corner, the mouse enters it there. It's not on the screen, like no
+        // window that AeroSpace manages: not focused, and not remembered as the window under the mouse (the mouse that
+        // enters it when it's on the screen again focuses it). See ``Window/isParkedOffTheScreen``
+        let real = real?.isParkedOffTheScreen == true ? nil : real
         let previous: Window?? = isRealWindowKnown ? .some(realWindow) : .none
         realWindow = real
         isRealWindowKnown = true
@@ -204,9 +209,6 @@ struct FocusFollowsMouseTracker {
     /// which fills the workspace, on its way from the Dock to a small floating window in front of it. A click or a shortcut
     /// focuses the tiling window. Like Hyprland's `float_switch_override_focus = 0`, only where the windows overlap
     static func mayFocus(_ window: Window, from focused: Window?) -> Bool {
-        // The accessibility API finds the window in front at the corner, also a column that waits there: the tile of the
-        // column at the right edge reaches the corner, the mouse enters it there (see ``Window/isParkedOffTheScreen``)
-        if window.isParkedOffTheScreen { return false }
         guard let focused, focused.isFloating, !window.isFloating,
               let floatingFrame = focused.observedFrame, let frame = window.observedFrame
         else { return true }
