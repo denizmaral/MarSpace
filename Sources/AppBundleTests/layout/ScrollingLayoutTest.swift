@@ -103,6 +103,22 @@ struct ScrollingLayoutTest {
         assertEquals(workspace.windowsUnderMouse(CGPoint(x: 1800, y: 100)), [third])
     }
 
+    /// The focus runs in a session after the check: a layout in between may have moved the column off the screen
+    @Test func testTheMouseDoesntFocusAColumnThatWentOffTheScreenSinceTheCheck() async throws {
+        let (workspace, root) = scrollingWorkspace()
+        let first = TestWindow.new(id: 1, parent: root)
+        let second = TestWindow.new(id: 2, parent: root)
+        let third = TestWindow.new(id: 3, parent: root)
+        #expect(first.focusWindow())
+        try await workspace.layoutWorkspace()
+        assertEquals(third.isParkedOffTheScreen, true)
+
+        focusFollowsMouse(to: third, ifTheFocusDidntChangeSince: focusChangesByOtherMeans)
+        assertEquals(globalFocus.windowOrNil, first)
+        focusFollowsMouse(to: second, ifTheFocusDidntChangeSince: focusChangesByOtherMeans)
+        assertEquals(globalFocus.windowOrNil, second)
+    }
+
     @Test func testAResizedColumnKeepsTheOthersAsTheyAre() async throws {
         let (workspace, root) = scrollingWorkspace()
         let first = TestWindow.new(id: 1, parent: root)
