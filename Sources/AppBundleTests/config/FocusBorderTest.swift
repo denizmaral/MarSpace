@@ -44,4 +44,22 @@ struct FocusBorderTest {
             Rect(topLeftX: 4, topLeftY: 4, width: 1792, height: 1161),
         )
     }
+
+    /// The panel is right below the focused window: nothing of MarSpace covers the window (macOS hides the buttons of a
+    /// secure dialog, e.g. the purchase sheet of App Store, while a window of another app is over it)
+    @Test func testThePanelIsRightBelowTheWindow() {
+        let app: Int32 = 100
+        let other: Int32 = 200
+        let panel: CGWindowID = 9
+        #expect(isPanelRightBelow([(9, 1, 0)], pid: app, panel: panel))
+        // A helper window of the app between them, the desktop doesn't count
+        #expect(isPanelRightBelow([(5, app, 0), (9, 1, 0)], pid: app, panel: panel))
+        // A window of another app between them covers the border
+        #expect(!isPanelRightBelow([(6, other, 0), (9, 1, 0)], pid: app, panel: panel))
+        // Other layers (the menu bar, the Dock) don't count
+        #expect(isPanelRightBelow([(7, other, 20), (9, 1, 0)], pid: app, panel: panel))
+        // Not below the window at all, or not shown
+        #expect(!isPanelRightBelow([(6, other, 0)], pid: app, panel: panel))
+        #expect(!isPanelRightBelow([(9, 1, 0)], pid: app, panel: nil))
+    }
 }
