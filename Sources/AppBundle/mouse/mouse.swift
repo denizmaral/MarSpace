@@ -15,20 +15,33 @@ func isManipulatedWithMouse(_ window: Window) async throws -> Bool {
 /// Same motivation as in monitorFrameNormalized
 var mouseLocation: CGPoint { NSEvent.mouseLocation.withYAxisFlipped }
 
-/// One of the windows of MarSpace (`ownWindowNumbers`) is the front most window at `location` (top left origin): one behind
-/// the windows of other apps doesn't count. One query of the window server, no accessibility calls; any thread
-func isOwnWindowInFront(at location: CGPoint, ownWindowNumbers own: Set<Int>) -> Bool {
+/// One of the windows of MarSpace (`ownWindowNumbers`: the ones at `location`, top left origin) is in front there: one behind
+/// the windows of other apps doesn't count. The window server lists only the windows above each of them (no accessibility
+/// calls, any thread)
+func isOwnWindowInFront(at location: CGPoint, ownWindowNumbers own: some Sequence<Int>) -> Bool {
     let ownPid = ProcessInfo.processInfo.processIdentifier
-    let infos = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-    for info in infos { // Front to back
-        guard let number = info[kCGWindowNumber as String] as? Int,
-              let bounds = (info[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0) }),
-              bounds.contains(location)
-        else { continue }
-        if own.contains(number) { return true }
-        // Another app's window in the normal layer is in front. Other layers (the menu bar, the Dock) and MarSpace's
-        // other windows (the focus border) don't decide
-        if info[kCGWindowOwnerPID as String] as? Int32 != ownPid, info[kCGWindowLayer as String] as? Int == 0 { return false }
+    return own.contains { number in
+        let infos = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .excludeDesktopElements], CGWindowID(number)) as? [[String: Any]] ?? []
+        return isInFront(at: location, windowsAbove: infos.compactMap { info in
+            guard let layer = info[kCGWindowLayer as String] as? Int,
+                  let bounds = (info[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0) })
+            else { return nil }
+            return WindowAbove(isOwn: info[kCGWindowOwnerPID as String] as? Int32 == ownPid, layer: layer, bounds: bounds)
+        })
     }
-    return true // Not in the list (yet): as before, MarSpace's window is under the mouse
+}
+
+/// A window that the window server shows above a window of MarSpace
+struct WindowAbove: Equatable {
+    /// Of MarSpace (e.g. the focus border)
+    let isOwn: Bool
+    let layer: Int
+    /// Top left origin
+    let bounds: CGRect
+}
+
+/// The window of MarSpace with `windowsAbove` is in front at `location`: no window of another app in the normal layer covers
+/// it there. Other layers (the menu bar, the Dock) and MarSpace's other windows (the focus border) don't cover it
+func isInFront(at location: CGPoint, windowsAbove: [WindowAbove]) -> Bool {
+    !windowsAbove.contains { !$0.isOwn && $0.layer == 0 && $0.bounds.contains(location) }
 }
