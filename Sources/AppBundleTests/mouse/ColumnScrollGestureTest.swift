@@ -118,6 +118,15 @@ struct ColumnScrollGestureTest {
         assertEquals(shared.handle(.momentum, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: 0, isOwnWindowInFront: false)?.verdict, .pass)
     }
 
+    /// AppKit gives some windows of MarSpace a number that isn't one of the window server: the button of the menu bar has a
+    /// negative one. The mouse over it crashed MarSpace (the conversion to a window id trapped)
+    @Test func testAWindowNumberThatTheWindowServerDoesntKnow() {
+        let location = CGPoint(x: 1500, y: 10)
+        #expect(isOwnWindowInFront(at: location, ownWindowNumbers: [-1]))
+        #expect(isOwnWindowInFront(at: location, ownWindowNumbers: [0]))
+        #expect(isOwnWindowInFront(at: location, ownWindowNumbers: [Int(UInt32.max) + 1]))
+    }
+
     /// The windows that the window server shows above a window of MarSpace: only the ones of other apps in the normal layer
     /// cover it
     @Test func testWhatCoversAWindowOfMarSpace() {

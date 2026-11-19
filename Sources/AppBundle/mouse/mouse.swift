@@ -21,7 +21,10 @@ var mouseLocation: CGPoint { NSEvent.mouseLocation.withYAxisFlipped }
 func isOwnWindowInFront(at location: CGPoint, ownWindowNumbers own: some Sequence<Int>) -> Bool {
     let ownPid = ProcessInfo.processInfo.processIdentifier
     return own.contains { number in
-        let infos = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .excludeDesktopElements], CGWindowID(number)) as? [[String: Any]] ?? []
+        // AppKit gives some windows a number that isn't a window of the window server (the button of the menu bar has a
+        // negative one): nothing to ask about, as before it's MarSpace's window under the mouse
+        guard let windowId = CGWindowID(exactly: number), windowId != kCGNullWindowID else { return true }
+        let infos = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .excludeDesktopElements], windowId) as? [[String: Any]] ?? []
         return isInFront(at: location, windowsAbove: infos.compactMap { info in
             guard let layer = info[kCGWindowLayer as String] as? Int,
                   let bounds = (info[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0) })

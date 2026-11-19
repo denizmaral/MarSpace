@@ -65,7 +65,7 @@ final class FocusBorderController {
         let stacking = verified.map { .onScreen($0, isPanelInPlace: true) } ?? windowStacking(
             of: nativeWindowId,
             pid: window.macApp.pid,
-            panel: panel.isVisible ? CGWindowID(panel.windowNumber) : nil,
+            panel: panel.isVisible ? CGWindowID(exactly: panel.windowNumber) : nil,
             windowFrame: CGRect(x: windowFrame.topLeftX, y: windowFrame.topLeftY, width: windowFrame.width, height: windowFrame.height),
             // A window beyond the edge of the monitor: the border follows the edge, over the window
             isBorderOverTheWindow: windowRect != windowFrame,
