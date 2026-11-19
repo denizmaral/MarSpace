@@ -70,6 +70,8 @@ import Common
         focusLogger.info("ffm yields to the focus of \(globalFocus.windowOrNil?.windowId.description ?? "nil", privacy: .public)")
         return
     }
+    // A layout since the check (e.g. a resize) may have moved its column off the screen
+    guard !window.isParkedOffTheScreen else { return }
     _ = window.focusWindow()
     window.nativeFocus()
 }
