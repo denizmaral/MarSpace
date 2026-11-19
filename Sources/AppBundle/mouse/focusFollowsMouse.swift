@@ -220,11 +220,23 @@ extension Workspace {
     }
 }
 
+extension Window {
+    /// A tiling window without a tile: a column of a scrolling workspace that is off the screen. It waits in the bottom
+    /// right corner of the screen with a pixel of it on the screen (see ``Layout/scrolling``), its observed frame is
+    /// there: the mouse that passes the corner, next to the Dock, must not focus it (the screen would scroll to it). A
+    /// fullscreen window has no tile either, it fills the screen
+    @MainActor
+    fileprivate var isParkedOffTheScreen: Bool {
+        parent is TilingContainer && lastAppliedLayoutPhysicalRect == nil && !isFullscreen
+    }
+}
+
 extension TreeNode {
     @MainActor
     fileprivate func appendWindows(at location: CGPoint, to result: inout [Window]) {
         if let window = self as? Window {
-            if window.lifeStatus.isInhabited, (window.observedFrame ?? window.lastAppliedLayoutPhysicalRect)?.contains(location) == true {
+            guard window.lifeStatus.isInhabited, !window.isParkedOffTheScreen else { return }
+            if (window.observedFrame ?? window.lastAppliedLayoutPhysicalRect)?.contains(location) == true {
                 result.append(window)
             }
         } else if let accordion = self as? TilingContainer, accordion.layout == .accordion {
