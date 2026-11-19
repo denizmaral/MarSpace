@@ -38,6 +38,7 @@ extension Settings {
             case .control: .maskControl
             case .shift: .maskShift
         }
+        config.reversesTrackpadScrollDirection = general.reverseTrackpadScrollDirection
         config.defaultRootContainerOrientation = general.defaultRootOrientation
         config.enableNormalizationFlattenContainers = general.flattenContainers
         config.enableNormalizationOppositeOrientationForNestedContainers = general.oppositeOrientationForNestedContainers

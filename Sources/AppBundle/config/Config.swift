@@ -29,6 +29,8 @@ struct Config: Withable {
     var trackpadScrollsColumns: Bool = true
     /// Held while the fingers move through the columns: none, or e.g. Option (the gestures without it go to the apps)
     var trackpadScrollModifiers: CGEventFlags = []
+    /// The columns move the other way around than macOS scrolls (see TrackpadColumnScrolling)
+    var reversesTrackpadScrollDirection: Bool = false
     var enableNormalizationOppositeOrientationForNestedContainers: Bool = true
     var persistentWorkspaces: OrderedSet<String> = []
     var focusFollowsMouse: Bool = false

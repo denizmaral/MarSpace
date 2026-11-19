@@ -49,6 +49,13 @@ struct SettingsTest {
     }
 
     /// A custom command line is parsed: flags without a typed action, sequences, quoting
+    @Test func testTheTrackpadDirectionCanBeReversed() {
+        var settings = Settings()
+        assertEquals(settings.compile().config.reversesTrackpadScrollDirection, false)
+        settings.general.reverseTrackpadScrollDirection = true
+        assertEquals(settings.compile().config.reversesTrackpadScrollDirection, true)
+    }
+
     @Test func testCustomCommandLinesAreParsed() {
         for line in ["focus --boundaries workspace left", "exec-and-forget open -a Terminal", "mode main; focus left", "workspace next"] {
             guard case .cmd(let parsed) = parseCommand(line, allowExecAndForget: true, allowEval: false),

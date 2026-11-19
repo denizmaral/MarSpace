@@ -209,6 +209,10 @@ private struct GeneralPane: View {
                         Text("⇧ Shift").tag(Settings.TrackpadScrollModifier?.some(.shift))
                     }
                     .help("With a key, the apps keep two fingers sideways without it (e.g. back and forward in a browser)")
+                    Toggle(isOn: $general.reverseTrackpadScrollDirection) {
+                        Text("Reverse direction")
+                        Text("The fingers going left bring the columns on the left. Off: the columns follow the scroll direction of macOS")
+                    }
                 }
                 Picker("Orientation", selection: $general.defaultRootOrientation) {
                     Text("Automatic").tag(DefaultContainerOrientation.auto)

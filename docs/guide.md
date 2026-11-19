@@ -146,7 +146,7 @@ On a scrolling workspace, **two fingers sideways on the trackpad** move through 
 swipe (Settings › General › Two fingers move through the columns). Scrolling up and down, and scrolling inside a floating
 window, stays with the apps. If you miss swiping sideways in your apps there (back and forward in a browser), choose a
 key to hold while swiping. The direction follows macOS: with natural scrolling, the fingers going left bring the columns
-on the right.
+on the right. Settings › General › Reverse direction turns it the other way around.
 
 Switching never loses anything: the workspace remembers its tiles and its columns as you left them, and puts the windows
 back when it tiles or scrolls again (windows that you opened meanwhile are placed like new windows). The floating

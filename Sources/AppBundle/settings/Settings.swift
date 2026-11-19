@@ -39,6 +39,8 @@ struct Settings: Codable, Sendable, Equatable {
         var trackpadScrollsColumns = true
         /// Held while the fingers move through the columns. nil: no modifier
         var trackpadScrollModifier: TrackpadScrollModifier? = nil
+        /// The fingers going left bring the columns on the left: the other way around than macOS scrolls
+        var reverseTrackpadScrollDirection = false
         var defaultRootOrientation: DefaultContainerOrientation = .auto
         var flattenContainers = true
         var oppositeOrientationForNestedContainers = true
