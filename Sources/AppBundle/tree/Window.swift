@@ -6,6 +6,10 @@ open class Window: TreeNode, Hashable {
     let app: any AbstractApp
     var lastFloatingSize: CGSize?
     var isFullscreen: Bool = false
+    /// In a column of a scrolling workspace that is off the screen: it waits in the bottom right corner of the screen with
+    /// a pixel of it on the screen, next to the Dock (see ``Layout/scrolling``). Not a target of the mouse. Set by the
+    /// layout of the tiling tree
+    var isParkedOffTheScreen: Bool = false
     /// A pinned floating window is on the workspace that its monitor shows. See ``PinCommand``
     var isPinned: Bool = false
     var noOuterGapsInFullscreen: Bool = false

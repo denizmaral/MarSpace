@@ -88,6 +88,7 @@ extension TreeNode {
                 for (window, windowRect) in zip(windows, rects) {
                     window.lastAppliedLayoutPhysicalRect = nil
                     window.lastAppliedLayoutVirtualRect = nil
+                    window.isParkedOffTheScreen = false
                     if let windowRect { window.observeFrame(windowRect) }
                     // The size that it goes back to when it's made floating again, and when MarSpace quits
                     if let frame = window.floatingFrameToApply { // The workspace floats it, see Window.floatByWorkspaceLayout
@@ -124,6 +125,7 @@ extension TreeNode {
         let physicalRect = Rect(topLeftX: point.x, topLeftY: point.y, width: width, height: height)
         switch tilingTreeNodeCasesOrDie() {
             case .window(let window):
+                window.isParkedOffTheScreen = false // Unless its column is off the screen, see layoutScrolling
                 if window.windowId == currentlyManipulatedWithMouseWindowId { return .zero } // Its size follows the mouse
                 lastAppliedLayoutVirtualRect = virtual
                 if window.isFullscreen && window == context.workspace.rootTilingContainer.mostRecentWindowRecursive {
@@ -513,7 +515,10 @@ extension TilingContainer {
                 &frames,
             )
             if isParked {
-                for frame in firstFrame ..< frames.count { frames[frame].isParked = true }
+                for frame in firstFrame ..< frames.count {
+                    frames[frame].isParked = true
+                    frames[frame].window.isParkedOffTheScreen = true
+                }
                 column.forgetAppliedLayoutRecursive() // Nothing of it is on the screen: not a target of the mouse
             } else {
                 excessAcross = max(excessAcross, excess.along(orientation.opposite))
