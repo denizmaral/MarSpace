@@ -9,7 +9,11 @@ import Testing
 @MainActor
 @Suite(.serializedGlobally)
 struct FocusFollowsMouseTrackerTest {
-    init() { setUpWorkspacesForTests() }
+    init() {
+        setUpWorkspacesForTests()
+        // The mouse is over the workspace that is shown: the windows of the others aren't focused
+        check(Workspace.get(byName: name).focusWorkspace())
+    }
 
     private let start = ContinuousClock.now
 

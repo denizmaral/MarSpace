@@ -103,6 +103,25 @@ struct ScrollingLayoutTest {
         assertEquals(workspace.windowsUnderMouse(CGPoint(x: 1800, y: 100)), [third])
     }
 
+    /// The windows of a workspace that isn't shown wait in the corner too, a pixel of each on the screen: the mouse that
+    /// passes there doesn't focus them (their workspace would be shown)
+    @Test func testTheMouseDoesntFocusAWindowOfAWorkspaceThatIsntShown() async throws {
+        let workspace = Workspace.get(byName: name)
+        let shown = TestWindow.new(id: 1, parent: workspace.rootTilingContainer)
+        #expect(shown.focusWindow())
+        try await workspace.layoutWorkspace()
+        let hidden = TestWindow.new(id: 2, parent: Workspace.get(byName: "other").rootTilingContainer)
+        #expect(Workspace.get(byName: "other").isVisible == false)
+
+        var tracker = FocusFollowsMouseTracker()
+        let other = TestWindow.new(id: 3, parent: workspace.floatingWindowsContainer)
+        assertEquals(tracker.mouseMoved(over: [other], focused: shown, focusChanges: 0, now: .now, frontmost: { nil }), .enter)
+        assertEquals(tracker.checked(real: hidden, focused: shown, focusChanges: 0, now: .now), nil)
+        focusFollowsMouse(to: hidden, ifTheFocusDidntChangeSince: focusChangesByOtherMeans)
+        assertEquals(globalFocus.windowOrNil, shown)
+        assertEquals(globalFocus.workspace, workspace)
+    }
+
     /// The focus runs in a session after the check: a layout in between may have moved the column off the screen
     @Test func testTheMouseDoesntFocusAColumnThatWentOffTheScreenSinceTheCheck() async throws {
         let (workspace, root) = scrollingWorkspace()
