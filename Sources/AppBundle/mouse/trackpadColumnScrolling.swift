@@ -173,6 +173,12 @@ enum TrackpadColumnScrolling {
         thread.name = "MarSpace trackpad scrolling"
         thread.qualityOfService = .userInteractive
         thread.start()
+        // A window of MarSpace is in front of the other apps' windows only while MarSpace is active
+        for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { update() }
+            }
+        }
         update()
     }
 
@@ -187,9 +193,8 @@ enum TrackpadColumnScrolling {
             ? globalUnsortedMonitorInfos.map(\.visibleWorkspace).filter { $0.rootTilingContainer.layout == .scrolling }
             : []
         let screens = workspaces.map(\.workspaceMonitorInfo.rect)
-        // Not the windows of MarSpace that let the mouse through: the focus border covers the focused column
         let excluded = workspaces.flatMap { $0.floatingWindows.compactMap(\.observedFrame) } +
-            NSApp.windows.filter { $0.isVisible && !$0.ignoresMouseEvents }.map(\.frame.withYAxisFlipped)
+            ownWindowsInFront(NSApp.windows, isAppActive: NSApp.isActive).map(\.frame.withYAxisFlipped)
         let modifiers = config.trackpadScrollModifiers
         let isReversed = config.reversesTrackpadScrollDirection
         let changed = shared.withLock { shared in
@@ -197,6 +202,15 @@ enum TrackpadColumnScrolling {
             return shared.screens.isEmpty != screens.isEmpty
         }
         if changed { CGEvent.tapEnable(tap: port, enable: !screens.isEmpty) }
+    }
+
+    /// The windows of MarSpace that keep the gestures over the columns: the ones in front of the windows of the other apps.
+    /// A window of the normal level (the settings window) is in front only while MarSpace is the active app: behind the
+    /// windows of another app it would take the gestures over the whole screen. Not the windows that let the mouse
+    /// through (the focus border covers the focused column)
+    @MainActor
+    static func ownWindowsInFront(_ windows: [NSWindow], isAppActive: Bool) -> [NSWindow] {
+        windows.filter { $0.isVisible && !$0.ignoresMouseEvents && (isAppActive || $0.level > .normal) }
     }
 
     /// On the thread of the tap

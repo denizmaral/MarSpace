@@ -1,4 +1,5 @@
 @testable import AppBundle
+import AppKit
 import CoreGraphics
 import Testing
 
@@ -56,6 +57,24 @@ struct ColumnScrollGestureTest {
         assertEquals(columns(at: CGPoint(x: 960, y: 540), isContinuous: false), 0) // A mouse wheel
         assertEquals(columns(at: CGPoint(x: 200, y: 200)), 0) // Over a floating window
         assertEquals(columns(at: CGPoint(x: 2500, y: 540)), 0) // Another monitor
+    }
+
+    /// The settings window keeps the gestures only while it's in front: behind the windows of another app it would take
+    /// them over the whole screen
+    @MainActor
+    @Test func testOwnWindowsKeepTheGesturesOnlyInFront() {
+        let settings = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled], backing: .buffered, defer: true)
+        settings.isReleasedWhenClosed = false
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 400), styleMask: [.nonactivatingPanel], backing: .buffered, defer: true)
+        panel.level = .popUpMenu
+        let border = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.borderless], backing: .buffered, defer: true)
+        border.ignoresMouseEvents = true
+        border.isReleasedWhenClosed = false
+        for window in [settings, panel, border] { window.orderFrontRegardless() }
+        defer { for window in [settings, panel, border] { window.orderOut(nil) } }
+
+        assertEquals(TrackpadColumnScrolling.ownWindowsInFront([settings, panel, border], isAppActive: true), [settings, panel])
+        assertEquals(TrackpadColumnScrolling.ownWindowsInFront([settings, panel, border], isAppActive: false), [panel])
     }
 
     /// A quick flick is shorter than a column: it moves one anyway
