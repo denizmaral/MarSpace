@@ -1,5 +1,4 @@
 @testable import AppBundle
-import AppKit
 import CoreGraphics
 import Testing
 
@@ -59,22 +58,30 @@ struct ColumnScrollGestureTest {
         assertEquals(columns(at: CGPoint(x: 2500, y: 540)), 0) // Another monitor
     }
 
-    /// The settings window keeps the gestures only while it's in front: behind the windows of another app it would take
-    /// them over the whole screen
-    @MainActor
-    @Test func testOwnWindowsKeepTheGesturesOnlyInFront() {
-        let settings = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled], backing: .buffered, defer: true)
-        settings.isReleasedWhenClosed = false
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 400), styleMask: [.nonactivatingPanel], backing: .buffered, defer: true)
-        panel.level = .popUpMenu
-        let border = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.borderless], backing: .buffered, defer: true)
-        border.ignoresMouseEvents = true
-        border.isReleasedWhenClosed = false
-        for window in [settings, panel, border] { window.orderFrontRegardless() }
-        defer { for window in [settings, panel, border] { window.orderOut(nil) } }
-
-        assertEquals(TrackpadColumnScrolling.ownWindowsInFront([settings, panel, border], isAppActive: true), [settings, panel])
-        assertEquals(TrackpadColumnScrolling.ownWindowsInFront([settings, panel, border], isAppActive: false), [panel])
+    /// A window of MarSpace keeps the gestures where it's in front: the settings window behind the windows of another app
+    /// would take them over most of the screen. The window server is asked only over one of its windows
+    @Test func testOwnWindowsKeepTheGesturesWhereTheyAreInFront() {
+        let screen = Rect(topLeftX: 0, topLeftY: 0, width: 1920, height: 1080)
+        let settings = TrackpadColumnScrolling.OwnWindow(number: 7, rect: Rect(topLeftX: 0, topLeftY: 0, width: 800, height: 600))
+        func swipe(at location: CGPoint, inFront: Bool) -> (columns: Int, asked: Bool) {
+            var asked = false
+            let isInFront: (CGPoint, [TrackpadColumnScrolling.OwnWindow]) -> Bool = { _, own in
+                asked = true
+                return inFront && own == [settings]
+            }
+            var shared = TrackpadColumnScrolling.Shared(screens: [screen], ownWindows: [settings])
+            _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: [], isContinuous: true, isOwnWindowInFront: isInFront)
+            let columns = shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, isOwnWindowInFront: isInFront).columns
+            return (columns, asked)
+        }
+        // A part of the settings window that is on top: its own
+        assertEquals(swipe(at: CGPoint(x: 400, y: 300), inFront: true).columns, 0)
+        // Covered by the window of another app: the columns move
+        assertEquals(swipe(at: CGPoint(x: 400, y: 300), inFront: false).columns, 1)
+        // Beyond the settings window: the window server isn't asked
+        let elsewhere = swipe(at: CGPoint(x: 1500, y: 800), inFront: true)
+        assertEquals(elsewhere.columns, 1)
+        assertEquals(elsewhere.asked, false)
     }
 
     /// A quick flick is shorter than a column: it moves one anyway
