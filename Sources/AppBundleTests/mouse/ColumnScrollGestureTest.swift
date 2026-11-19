@@ -103,6 +103,21 @@ struct ColumnScrollGestureTest {
         assertEquals(shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: again.generation, isOwnWindowInFront: true)?.columns, 0)
     }
 
+    /// The windows of MarSpace keep changing while the window server is asked: the gesture goes to the app, also its later
+    /// events, whatever the earlier gesture was
+    @Test func testAGestureLeftToTheAppForgetsTheEarlierGesture() {
+        let screen = Rect(topLeftX: 0, topLeftY: 0, width: 1920, height: 1080)
+        let location = CGPoint(x: 400, y: 300)
+        var shared = TrackpadColumnScrolling.Shared(screens: [screen])
+        _ = shared.handle(.began, dx: 0, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: 0, isOwnWindowInFront: false)
+        assertEquals(shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: 0, isOwnWindowInFront: false)?.columns, 1)
+        _ = shared.handle(.ended, dx: 0, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: 0, isOwnWindowInFront: false)
+        // The next gesture begins while the windows of MarSpace change three times in a row
+        assertEquals(shared.leaveToApp().verdict, .pass)
+        assertEquals(shared.handle(.changed, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: 0, isOwnWindowInFront: false)?.verdict, .pass)
+        assertEquals(shared.handle(.momentum, dx: -120, dy: 0, at: location, modifiers: [], isContinuous: true, ownWindowsGeneration: 0, isOwnWindowInFront: false)?.verdict, .pass)
+    }
+
     /// The windows that the window server shows above a window of MarSpace: only the ones of other apps in the normal layer
     /// cover it
     @Test func testWhatCoversAWindowOfMarSpace() {

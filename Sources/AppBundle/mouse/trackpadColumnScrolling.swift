@@ -103,6 +103,11 @@ struct ColumnScrollGesture: Sendable, Equatable {
         }
     }
 
+    /// The gesture is left to the app without a decision (see ``TrackpadColumnScrolling/Shared/leaveToApp()``)
+    mutating func leaveToApp() {
+        state = .left
+    }
+
     /// The fingers going right move the strip right: the columns on the left come in
     private mutating func step() -> Int {
         let columns = Int(distance / Self.columnDistance)
@@ -161,6 +166,13 @@ enum TrackpadColumnScrolling {
         /// event can begin a gesture. Usually none: nothing to ask
         func ownWindowsToAsk(_ phase: ColumnScrollGesture.Phase, at location: CGPoint) -> (windows: [OwnWindow], generation: UInt) {
             (canBegin(phase) ? ownWindows.filter { $0.rect.contains(location) } : [], ownWindowsGeneration)
+        }
+
+        /// The windows of MarSpace kept changing while the window server was asked: the gesture and its momentum go to the
+        /// app, no state of an earlier gesture moves columns
+        mutating func leaveToApp() -> (verdict: ColumnScrollGesture.Verdict, columns: Int) {
+            gesture.leaveToApp()
+            return (.pass, 0)
         }
 
         /// The event decides whether the gesture is wanted (see ``ColumnScrollGesture/handle(_:dx:dy:isWanted:)``)
@@ -273,7 +285,7 @@ enum TrackpadColumnScrolling {
             }
             if let result { return result }
         }
-        return (.pass, 0) // The windows of MarSpace keep changing (one is being dragged): the app gets the event
+        return shared.withLock { $0.leaveToApp() } // The windows of MarSpace keep changing (one is being dragged)
     }
 
     /// The columns of the workspace under the mouse move: its most recent window and the windows next to it, like `focus`
