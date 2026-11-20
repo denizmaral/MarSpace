@@ -304,6 +304,79 @@ struct FocusFollowsMouseTrackerTest {
         assertEquals(tracker.checked(real: second, focused: third, focusChanges: 1, now: at(705)), second)
     }
 
+    /// A swipe with four fingers to an app in macOS fullscreen and back. The window in fullscreen belongs to another
+    /// workspace: for MarSpace the focus went to that workspace and came back. The mouse was moved over the window in
+    /// fullscreen, on the way back it's over another window than the one that macOS focuses again: the first move focuses
+    /// it. It was taken as it is (another workspace is shown), and not focused until the mouse left it, or a click
+    @Test func testTheMouseComesBackFromAFullscreenSpaceOverAnotherWindow() async {
+        let (left, right, fullscreen) = await setUpTheMouseOverTheRightWindow()
+        await macOsFocuses(fullscreen)
+        assertEquals(moved(over: [], focused: fullscreen, at: 0), .leave) // No window of its workspace is there
+        await macOsFocuses(right) // The window that had the focus on the desktop
+
+        assertEquals(moved(over: [left], focused: right, at: 100), .enter)
+        assertEquals(mouseTracker.checked(real: left, focused: right, focusChanges: focusChangesByOtherMeans, now: at(105)), left)
+    }
+
+    /// The app in fullscreen quit: its window is gone when the focus comes back
+    @Test func testTheMouseComesBackFromAFullscreenAppThatQuit() async {
+        let (left, right, fullscreen) = await setUpTheMouseOverTheRightWindow()
+        await macOsFocuses(fullscreen)
+        assertEquals(moved(over: [], focused: fullscreen, at: 0), .leave)
+        _ = fullscreen.unbindAsClosed()
+        await macOsFocuses(right)
+
+        assertEquals(moved(over: [left], focused: right, at: 100), .enter)
+        assertEquals(mouseTracker.checked(real: left, focused: right, focusChanges: focusChangesByOtherMeans, now: at(105)), left)
+    }
+
+    /// The mouse rested over the right window, the keyboard focused the left one. A visit of the fullscreen Space without
+    /// touching the mouse changes nothing: moving it over the right window afterwards doesn't take the focus
+    @Test func testTheMouseRestsDuringAVisitOfAFullscreenSpace() async {
+        let (left, right, fullscreen) = await setUpTheMouseOverTheRightWindow()
+        await macOsFocuses(left)
+        await macOsFocuses(fullscreen)
+        await macOsFocuses(left)
+
+        assertEquals(moved(over: [right], focused: left, at: 0), .leave)
+        assertEquals(moved(over: [right], focused: left, at: 500), .stay)
+    }
+
+    /// The keyboard shows another workspace and comes back, no window in fullscreen: as before, the window under the
+    /// resting mouse is taken as it is
+    @Test func testAWorkspaceSwitchAndBackTakesTheWindowsAsTheyAre() async {
+        let (left, right, _) = await setUpTheMouseOverTheRightWindow()
+        let other = TestWindow.new(id: 4, parent: Workspace.get(byName: "other").rootTilingContainer)
+        await macOsFocuses(other)
+        assertEquals(moved(over: [], focused: other, at: 0), .leave)
+        await macOsFocuses(right)
+
+        assertEquals(moved(over: [left], focused: right, at: 100), .leave)
+        assertEquals(moved(over: [left], focused: right, at: 600), .stay)
+    }
+
+    /// Two tiles on the workspace of the test with the mouse over the focused right one, and a window in macOS fullscreen
+    /// that belongs to another workspace
+    private func setUpTheMouseOverTheRightWindow() async -> (left: TestWindow, right: TestWindow, fullscreen: TestWindow) {
+        let workspace = Workspace.get(byName: name)
+        let left = TestWindow.new(id: 1, parent: workspace.rootTilingContainer)
+        let right = TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
+        let fullscreen = TestWindow.new(id: 3, parent: Workspace.get(byName: "fullscreen").macOsNativeFullscreenWindowsContainer)
+        await macOsFocuses(right)
+        mouseTracker = FocusFollowsMouseTracker(windowsUnderMouse: [right], top: right)
+        return (left, right, fullscreen)
+    }
+
+    /// What a refresh session makes of the window that macOS focused
+    private func macOsFocuses(_ window: TestWindow) async {
+        assertEquals(window.focusWindow(), true)
+        await checkOnFocusChangedCallbacks_nonCancellable()
+    }
+
+    private func moved(over windows: [Window], focused: Window, at milliseconds: Int) -> FocusFollowsMouseTracker.MouseMove {
+        mouseTracker.mouseMoved(over: windows, focused: focused, focusChanges: focusChangesByOtherMeans, now: at(milliseconds), frontmost: { nil })
+    }
+
     /// The hit test sees what the user sees, not the tiles: App Store (left) is 1000 wide in its 960 wide tile
     @Test func testWindowsUnderTheMouseAreFoundByTheirObservedFrames() async throws {
         let workspace = Workspace.get(byName: name)

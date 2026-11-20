@@ -85,7 +85,7 @@ enum MissionControl {
         exitFallbackTask?.cancel()
         exitFallbackTask = nil
         // The mouse stopped over some window. Don't focus it until the mouse enters another window
-        resetFocusFollowsMouse()
+        resetFocusFollowsMouse(because: "Mission Control was closed")
         scheduleCancellableCompleteRefreshSession(.globalObserver(exitNotification)) // Shows the focus border again
     }
 }

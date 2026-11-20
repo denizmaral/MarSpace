@@ -102,6 +102,9 @@ extension Workspace {
 }
 
 @MainActor private var _lastKnownFocus: FrozenFocus = _focus
+/// The window of `_lastKnownFocus` was in macOS fullscreen as of the last check: its Space was shown, not the workspaces.
+/// Noted then, because the window may be gone when the focus leaves it (its app quit)
+@MainActor private var wasLastKnownFocusInMacosFullscreen = false
 
 /// Focus changes that focus-follows-mouse didn't make: the keyboard, commands, cmd-tab, clicks, an app that takes the focus
 /// (e.g. it was just launched). A check of the window under the mouse that started before one of them doesn't focus
@@ -144,12 +147,20 @@ extension Workspace {
     if frozenFocus.workspaceName != _lastKnownFocus.workspaceName {
         _prevFocusedWorkspaceName = _lastKnownFocus.workspaceName
         hasFocusedWorkspaceChanged = true
-        resetFocusFollowsMouse() // Other windows under the mouse, the mouse didn't move
+        if wasLastKnownFocusInMacosFullscreen {
+            // The focus comes back from a window in macOS fullscreen, which may belong to another workspace: its Space was
+            // shown (a swipe to it and back). The mouse was over that window, the one under it now is another window
+            // like one that it enters. Taken as it is, it wasn't focused until the mouse left it or a click
+            focusLogger.info("ffm keeps what it knows: the focus comes back from a window in macOS fullscreen")
+        } else {
+            resetFocusFollowsMouse(because: "another workspace is shown") // Other windows under the mouse, the mouse didn't move
+        }
     }
     if frozenFocus.monitorId_oneBased != _lastKnownFocus.monitorId_oneBased {
         hasFocusedMonitorChanged = true
     }
     _lastKnownFocus = frozenFocus
+    wasLastKnownFocusInMacosFullscreen = focus.windowOrNil?.parent is MacosFullscreenWindowsContainer
 
     if onFocusChangedRecursionGuard { return }
     onFocusChangedRecursionGuard = true
