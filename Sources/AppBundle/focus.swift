@@ -113,7 +113,13 @@ extension Workspace {
 
 /// macOS focused another window than MarSpace: counted even in a session of focus-follows-mouse, which takes over the macOS
 /// focus before it focuses the window under the mouse
-@MainActor func countFocusChangeByMacOs() { focusChangesByOtherMeans &+= 1 }
+@MainActor func countFocusChangeByMacOs() {
+    focusChangesByOtherMeans &+= 1
+    hasMacOsMovedTheFocus = true
+}
+
+/// macOS moved the focus since the last check (``checkOnFocusChangedCallbacks_nonCancellable()``), not a command of MarSpace
+@MainActor private var hasMacOsMovedTheFocus = false
 
 // Used by workspace-back-and-forth
 @MainActor var _prevFocusedWorkspaceName: String? = nil {
@@ -139,6 +145,8 @@ extension Workspace {
     var hasFocusChanged = false
     var hasFocusedWorkspaceChanged = false
     var hasFocusedMonitorChanged = false
+    let isFocusMovedByMacOs = hasMacOsMovedTheFocus
+    hasMacOsMovedTheFocus = false
     if frozenFocus != _lastKnownFocus {
         _prevFocus = _lastKnownFocus
         hasFocusChanged = true
@@ -147,10 +155,12 @@ extension Workspace {
     if frozenFocus.workspaceName != _lastKnownFocus.workspaceName {
         _prevFocusedWorkspaceName = _lastKnownFocus.workspaceName
         hasFocusedWorkspaceChanged = true
-        if wasLastKnownFocusInMacosFullscreen {
+        if wasLastKnownFocusInMacosFullscreen && isFocusMovedByMacOs {
             // The focus comes back from a window in macOS fullscreen, which may belong to another workspace: its Space was
             // shown (a swipe to it and back). The mouse was over that window, the one under it now is another window
-            // like one that it enters. Taken as it is, it wasn't focused until the mouse left it or a click
+            // like one that it enters. Taken as it is, it wasn't focused until the mouse left it or a click.
+            // Not when a command of MarSpace left the window (a workspace shortcut): the keyboard chose the window, the
+            // one under the resting mouse is taken as it is, like after any workspace switch with the keyboard
             focusLogger.info("ffm keeps what it knows: the focus comes back from a window in macOS fullscreen")
         } else {
             resetFocusFollowsMouse(because: "another workspace is shown") // Other windows under the mouse, the mouse didn't move
