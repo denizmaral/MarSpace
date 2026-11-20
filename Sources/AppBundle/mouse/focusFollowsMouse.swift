@@ -282,7 +282,8 @@ private nonisolated func axWindowUnderMouse(_ location: CGPoint) async -> AxElem
         guard let pid = element.pid, let topmost = topmostWindow(at: location, of: pid) else { return .notAWindow }
         return topmost.layer == 0 ? .window(nativeWindowId: topmost.id, pid: pid) : .notAWindow
     }
-    guard let nativeWindowId = window.containingNativeWindowId(), let pid = window.pid else {
+    // The mouse over a sheet is over the window that the sheet is attached to
+    guard let nativeWindowId = window.windowOfSheet?.windowId ?? window.containingNativeWindowId(), let pid = window.pid else {
         return topmostWindow(at: location).map { .window(nativeWindowId: $0.id, pid: $0.pid) } ?? .unknown
     }
     return .window(nativeWindowId: nativeWindowId, pid: pid)
