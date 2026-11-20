@@ -152,8 +152,7 @@ final class MacApp: AbstractApp {
     // todo merge together with detectNewWindows
     func getFocusedWindow(_ cm: CancellationMode) async throws -> Window? {
         let nativeWindowId = try await thread?.runInLoop(cm) { [pid, axApp, windows] job in
-            try axApp.threadGuarded.get(Ax.focusedWindowAttr)
-                .map { $0.ax.windowOfSheet ?? $0 } // The focus in a sheet is the focus of its window
+            try axApp.threadGuarded.focusedWindowOfApp // The focus in a sheet is the focus of its window
                 .flatMap { try windows.threadGuarded.getOrRegisterAxWindow(windowId: $0.windowId, $0.ax.cast, pid, job) }?
                 .windowId
         }
