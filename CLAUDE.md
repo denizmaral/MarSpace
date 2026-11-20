@@ -90,6 +90,7 @@ Async functions take a `CancellationMode` (`.cancellable` / `.nonCancellable`). 
 
 ### New-window placement (`AppBundle/tree/MacWindow.swift`)
 1. `MacWindow.getOrRegister` classifies a window as popup, dialog or tiling (see "Dialogs" in `docs/guide.md`).
+   A sheet (a file picker or an alert attached to a window) is no window of its own: its app reports it as its focused window, MarSpace takes the window that it's attached to (`windowOfSheet`).
 2. A tiling window is bound right after the workspace's most recent window.
 3. The `on-window-detected` callbacks run (`runOnWindowDetected`).
 
