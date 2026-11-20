@@ -30,4 +30,10 @@ extension AxUiElementMock {
         }
         return nil
     }
+
+    /// The focused window of the app (the element is the app): the focus in a sheet is the focus of the window that the
+    /// sheet is attached to. A sheet that doesn't tell its window stays the focused window, as before
+    var focusedWindowOfApp: WindowIdAndAxUiElementMock? {
+        self.get(Ax.focusedWindowAttr).map { $0.ax.windowOfSheet ?? $0 }
+    }
 }

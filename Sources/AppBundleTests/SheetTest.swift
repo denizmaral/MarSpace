@@ -24,6 +24,17 @@ struct SheetTest {
         assertEquals(alert.windowOfSheet?.windowId, 10506)
     }
 
+    /// What a refresh session takes as the focused window of the app (MacApp.getFocusedWindow)
+    @Test func testFocusInSheetIsTheFocusOfItsWindow() {
+        let sheet: [String: Any] = ["AXRole": kAXSheetRole, "AXParent": Self.window, "Aero.windowId_native": 11312]
+        assertEquals(element(["AXFocusedWindow": sheet]).focusedWindowOfApp?.windowId, 10506)
+        assertEquals(element(["AXFocusedWindow": Self.window]).focusedWindowOfApp?.windowId, 10506)
+        // A sheet that doesn't tell its window is the focused window, as before
+        let alone: [String: Any] = ["AXRole": kAXSheetRole, "Aero.windowId_native": 11312]
+        assertEquals(element(["AXFocusedWindow": alone]).focusedWindowOfApp?.windowId, 11312)
+        assertNil(element([:]).focusedWindowOfApp?.windowId) // E.g. an app without windows
+    }
+
     @Test func testWindowIsNotASheet() {
         assertNil(element(Self.window).windowOfSheet?.windowId)
         // A panel of its own (the "Open" panel of an app without a window): its parent is the app
