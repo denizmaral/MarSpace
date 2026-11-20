@@ -3,7 +3,8 @@ import Common
 
 @MainActor private var focusFollowsMouseMonitor: Any? = nil
 @MainActor private var focusFollowsTask: Task<(), any Error>? = nil
-@MainActor private var mouseTracker = FocusFollowsMouseTracker()
+/// Not private for the tests: what the refresh sessions make of it (see ``resetFocusFollowsMouse(because:)``)
+@MainActor var mouseTracker = FocusFollowsMouseTracker()
 
 @MainActor func syncFocusFollowsMouse(_ config: Config) {
     if config.focusFollowsMouse == (focusFollowsMouseMonitor != nil) {
@@ -77,8 +78,10 @@ import Common
 }
 
 /// The windows under the mouse changed without the mouse crossing a window border: another workspace is shown, Mission
-/// Control was closed. The window under the mouse must not be focused until the mouse enters another window
-@MainActor func resetFocusFollowsMouse() {
+/// Control was closed. The window under the mouse must not be focused until the mouse enters another window. Not when the
+/// focus comes back from a window in macOS fullscreen (see ``checkOnFocusChangedCallbacks_nonCancellable()``)
+@MainActor func resetFocusFollowsMouse(because reason: StaticString) {
+    focusLogger.info("ffm takes the next windows as they are: \(reason, privacy: .public)")
     focusFollowsTask?.cancel()
     mouseTracker.takeTheNextWindowsAsTheyAre()
 }
