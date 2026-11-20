@@ -342,6 +342,18 @@ struct FocusFollowsMouseTrackerTest {
         assertEquals(moved(over: [right], focused: left, at: 500), .stay)
     }
 
+    /// A workspace shortcut leaves the window in fullscreen, the mouse was moved over it meanwhile. The keyboard chose the
+    /// window, not macOS: the one under the mouse is taken as it is, like after any workspace switch with the keyboard
+    @Test func testAShortcutLeavesTheFullscreenSpace() async {
+        let (left, right, fullscreen) = await setUpTheMouseOverTheRightWindow()
+        await macOsFocuses(fullscreen)
+        assertEquals(moved(over: [], focused: fullscreen, at: 0), .leave)
+        await commandFocuses(right)
+
+        assertEquals(moved(over: [left], focused: right, at: 100), .leave)
+        assertEquals(moved(over: [left], focused: right, at: 600), .stay)
+    }
+
     /// The keyboard shows another workspace and comes back, no window in fullscreen: as before, the window under the
     /// resting mouse is taken as it is
     @Test func testAWorkspaceSwitchAndBackTakesTheWindowsAsTheyAre() async {
@@ -369,6 +381,14 @@ struct FocusFollowsMouseTrackerTest {
 
     /// What a refresh session makes of the window that macOS focused
     private func macOsFocuses(_ window: TestWindow) async {
+        updateFocusCache(nil) // Whatever the test before left as the focus of macOS
+        updateFocusCache(window)
+        assertEquals(globalFocus.windowOrNil, window)
+        await checkOnFocusChangedCallbacks_nonCancellable()
+    }
+
+    /// What the session of a command makes of the window that the command focused (e.g. a workspace shortcut)
+    private func commandFocuses(_ window: TestWindow) async {
         assertEquals(window.focusWindow(), true)
         await checkOnFocusChangedCallbacks_nonCancellable()
     }
