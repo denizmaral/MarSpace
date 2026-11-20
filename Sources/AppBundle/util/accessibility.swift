@@ -198,6 +198,10 @@ enum Ax {
         key: kAXWindowAttribute,
         getter: { ($0 as! AXUIElement) },
     )
+    static let parentAttr = ReadableAttrImpl<any AxUiElementMock>(
+        key: kAXParentAttribute,
+        getter: castToAxUiElementMock,
+    )
     static let titleAttr = WritableAttrImpl<String>(
         key: kAXTitleAttribute,
         getter: { $0 as? String },
