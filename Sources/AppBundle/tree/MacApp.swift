@@ -405,6 +405,16 @@ final class MacApp: AbstractApp {
         if let backgroundTabId = noLongerAlive.singleOrNil()?.key,
            let frontmostTabId = becameAlive.singleOrNil()?.key
         {
+            // A tab swap hands the place of the window that went away over to the one that appeared. A window that isn't
+            // managed as a window has no place: e.g. the window that an app shows only while its window goes fullscreen (a
+            // popup, gone before the frames can be compared) took the id of the window in fullscreen, which was registered
+            // again as a new window
+            guard let backgroundWindow = windowIdMapping.backward[backgroundTabId].flatMap({ Window.get(byId: $0) }),
+                  !(backgroundWindow.parent is MacosPopupWindowsContainer)
+            else {
+                windowsLogger.info("not a native tab swap (not a managed window): \(backgroundTabId) -> \(frontmostTabId)")
+                return
+            }
             guard mayBeTabsOfOneGroup(backgroundTabId, frontmostTabId) else {
                 windowsLogger.info("not a native tab swap (different frames): \(backgroundTabId) -> \(frontmostTabId)")
                 return
