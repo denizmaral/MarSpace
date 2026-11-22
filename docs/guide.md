@@ -43,7 +43,7 @@ You move around the tree in four directions with the **Focus** shortcuts, and ch
 
 **Move** trades the places of the window and its neighbor: the tiles stay where they are, the windows (and their
 sizes) change places. The neighbor is the window on that side that shares the most of the edge, the top or left one if
-several share the same. Right after a move, the opposite direction moves the window back. At the edge of the
+several share the same. Right after the window traded places, the opposite direction moves it back. At the edge of the
 workspace, where the window has no neighbor, it takes the whole edge: e.g. two windows side by side are put on top of
 each other, and a window at the bottom becomes a row as wide as the screen. The command line `move left` (a custom
 action) moves a window through the tree like i3 does. With the focus border (Settings › Appearance), the windows that a

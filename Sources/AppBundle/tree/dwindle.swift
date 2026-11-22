@@ -266,7 +266,9 @@ extension Window {
     func swapDwindleSplitAnchors(with other: Window) {
         func swapped(_ node: TreeNode?) -> TreeNode? { node === self ? other : node === other ? self : node }
         (dwindleSplitAnchor, other.dwindleSplitAnchor) = (swapped(other.dwindleSplitAnchor), swapped(dwindleSplitAnchor))
-        for window in nodeWorkspace?.allLeafWindowsRecursive ?? [] where window !== self && window !== other {
+        // Minimized windows remember their place in the tree too, their container isn't part of a workspace
+        let minimized = macosMinimizedWindowsContainer.children.compactMap { $0 as? Window }
+        for window in (nodeWorkspace?.allLeafWindowsRecursive ?? []) + minimized where window !== self && window !== other {
             window.dwindleSplitAnchor = swapped(window.dwindleSplitAnchor)
         }
     }

@@ -57,6 +57,7 @@ struct FocusBorderTest {
         #expect(isPanelRightNext(to: [StackedWindow(number: 7, pid: other, layer: 20), border], pid: app, panel: panel)) // The Dock doesn't count
         #expect(!isPanelRightNext(to: [StackedWindow(number: 6, pid: other, layer: 0)], pid: app, panel: panel))
         #expect(!isPanelRightNext(to: [border], pid: app, panel: nil)) // Not shown
+        #expect(isPanelRightNext(to: [StackedWindow(number: 8, pid: 1, layer: 0), border], pid: app, panel: panel, ignoring: [8])) // The move flash
     }
 
     /// The panel is below the focused window: nothing of MarSpace covers the window (macOS hides the buttons of a secure
