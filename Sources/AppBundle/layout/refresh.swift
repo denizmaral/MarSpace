@@ -127,6 +127,7 @@ func runLightSession<T>(
         }
         FocusBorderController.shared.update()
         MoveFlash.shared.flashPending()
+        movePointerAlongWithMovedWindow()
         WindowPlacementStore.persistIfChanged()
         if !event.isFocusFollowsMouse { scheduleCancellableCompleteRefreshSession(event) }
         return result

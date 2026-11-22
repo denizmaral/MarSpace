@@ -18,9 +18,15 @@ struct MoveCommand: Command {
         ) {
             return .fail
         }
-        // The window that went elsewhere flashes
+        // The window that went elsewhere flashes, the mouse pointer on it goes along
         let bindingGeneration = currentWindow.bindingGeneration
-        defer { if currentWindow.bindingGeneration != bindingGeneration { MoveFlash.shared.flashAfterLayout([currentWindow]) } }
+        let pointer = PointerOnWindow(currentWindow)
+        defer {
+            if currentWindow.bindingGeneration != bindingGeneration {
+                MoveFlash.shared.flashAfterLayout([currentWindow])
+                pointer?.followAfterLayout()
+            }
+        }
         switch currentWindow.windowParentCases {
             case nil: return .fail
             case .tilingContainer(let parent):
