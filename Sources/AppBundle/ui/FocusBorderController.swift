@@ -285,6 +285,64 @@ extension MacWindow {
     }
 }
 
+/// The windows that a move put elsewhere (`swap`, `move`) flash for a moment in the look of the focus border, twice as
+/// wide: the eye follows them to their new places, also the window that went where the focused window was. Only with the
+/// focus border (Settings › Appearance)
+@MainActor
+final class MoveFlash {
+    static let shared = MoveFlash()
+
+    private var pending: [Window] = []
+    private var panels: [FocusBorderPanel] = []
+    private var fadeOut: Task<(), any Error>? = nil
+
+    private init() {}
+
+    /// The windows flash when the refresh session has laid them out (see ``flashPending()``)
+    func flashAfterLayout(_ windows: [Window]) {
+        if isUnitTest || !config.focusBorder.enabled { return }
+        pending += windows.filter { window in !pending.contains { $0 === window } }
+    }
+
+    /// At the end of a refresh session: the windows are where the layout put them
+    func flashPending() {
+        let windows = pending
+        pending = []
+        guard !windows.isEmpty, TrayMenuModel.shared.isEnabled, !MissionControl.isActive else { return }
+        let border = config.focusBorder.with(\.width, config.focusBorder.width * 2)
+        let frames: [CGRect] = windows.compactMap { window in
+            guard let window = window as? MacWindow, let windowFrame = window.focusBorderRect else { return nil }
+            let windowRect = focusBorderWindowRect(windowFrame, monitor: window.nodeMonitorInfo?.rect, borderWidth: border.width)
+            guard windowRect.width > 0, windowRect.height > 0 else { return nil }
+            return focusBorderPanelFrame(windowRect: windowRect, borderWidth: border.width, mainMonitorHeight: mainMonitorInfo.height)
+        }
+        guard !frames.isEmpty else { return }
+        while panels.count < frames.count {
+            let panel = FocusBorderPanel()
+            panel.level = .floating // Above the windows for a moment, no stacking next to a window like the focus border
+            panels.append(panel)
+        }
+        let shown = Array(panels.prefix(frames.count))
+        for (panel, frame) in zip(shown, frames) {
+            panel.draw(size: frame.size, border)
+            panel.setFrame(frame, display: false)
+            panel.alphaValue = 1
+            panel.orderFrontRegardless()
+        }
+        for panel in panels.dropFirst(frames.count) { panel.orderOut(nil) }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.45
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            for panel in shown { panel.animator().alphaValue = 0 }
+        }
+        fadeOut?.cancel()
+        fadeOut = Task.startUnstructured { @MainActor in
+            try await Task.sleep(for: .milliseconds(500))
+            for panel in shown { panel.orderOut(nil) }
+        }
+    }
+}
+
 private final class FocusBorderPanel: NSPanel {
     private let gradientLayer = CAGradientLayer()
     private let strokeMask = CAShapeLayer()

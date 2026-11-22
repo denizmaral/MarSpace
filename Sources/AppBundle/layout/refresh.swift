@@ -126,6 +126,7 @@ func runLightSession<T>(
             focusAfter?.nativeFocus() // syncFocusToMacOs
         }
         FocusBorderController.shared.update()
+        MoveFlash.shared.flashPending()
         WindowPlacementStore.persistIfChanged()
         if !event.isFocusFollowsMouse { scheduleCancellableCompleteRefreshSession(event) }
         return result
