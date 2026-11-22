@@ -46,7 +46,8 @@ sizes) change places. The neighbor is the window on that side that shares the mo
 several share the same. Right after a move, the opposite direction moves the window back. At the edge of the
 workspace, where the window has no neighbor, it takes the whole edge: e.g. two windows side by side are put on top of
 each other, and a window at the bottom becomes a row as wide as the screen. The command line `move left` (a custom
-action) moves a window through the tree like i3 does.
+action) moves a window through the tree like i3 does. With the focus border (Settings › Appearance), the windows that a
+move put elsewhere flash for a moment in its colors.
 
 Shortcuts can also do what Hyprland users know by other names (Settings › Shortcuts, the action menu):
 

@@ -18,6 +18,9 @@ struct MoveCommand: Command {
         ) {
             return .fail
         }
+        // The window that went elsewhere flashes
+        let bindingGeneration = currentWindow.bindingGeneration
+        defer { if currentWindow.bindingGeneration != bindingGeneration { MoveFlash.shared.flashAfterLayout([currentWindow]) } }
         switch currentWindow.windowParentCases {
             case nil: return .fail
             case .tilingContainer(let parent):
