@@ -7,6 +7,8 @@ import Common
 struct PointerOnWindow {
     private let window: Window
     private let fraction: CGPoint
+    /// Where the pointer was: if the user moves it meanwhile, it stays where they put it
+    private let location: CGPoint
 
     /// nil if the pointer isn't over the window, the window isn't focused, or the focus doesn't follow the mouse
     @MainActor
@@ -18,6 +20,7 @@ struct PointerOnWindow {
         let mouse = mouseLocation
         guard frame.contains(mouse) else { return nil }
         self.window = window
+        location = mouse
         fraction = CGPoint(x: (mouse.x - frame.minX) / frame.width, y: (mouse.y - frame.minY) / frame.height)
     }
 
@@ -28,9 +31,11 @@ struct PointerOnWindow {
 
     @MainActor
     fileprivate func move() {
+        let mouse = mouseLocation
         guard !isUnitTest, window == globalFocus.windowOrNil,
+              abs(mouse.x - location.x) <= 1, abs(mouse.y - location.y) <= 1,
               let frame = window.observedFrame ?? window.lastAppliedLayoutPhysicalRect,
-              !frame.contains(mouseLocation)
+              !frame.contains(mouse)
         else { return }
         let point = CGPoint(x: frame.minX + fraction.x * frame.width, y: frame.minY + fraction.y * frame.height)
         // A mouse move, like the move-mouse command: focus-follows-mouse sees the pointer over the focused window

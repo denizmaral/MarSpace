@@ -66,6 +66,7 @@ final class FocusBorderController {
             of: nativeWindowId,
             pid: window.macApp.pid,
             panel: panel.isVisible ? CGWindowID(exactly: panel.windowNumber) : nil,
+            flashPanels: MoveFlash.shared.shownPanelNumbers,
             windowFrame: CGRect(x: windowFrame.topLeftX, y: windowFrame.topLeftY, width: windowFrame.width, height: windowFrame.height),
             // A window beyond the edge of the monitor: the border follows the edge, over the window
             isBorderOverTheWindow: windowRect != windowFrame,
@@ -215,6 +216,7 @@ private func windowStacking(
     of nativeWindowId: UInt32,
     pid: pid_t,
     panel: CGWindowID?,
+    flashPanels: Set<Int>,
     windowFrame: CGRect,
     isBorderOverTheWindow: Bool,
 ) -> WindowStacking {
@@ -230,15 +232,17 @@ private func windowStacking(
         case .above: windowsAbove()
         case .below: infos[(index + 1)...].map(StackedWindow.init) // From the window down
     }
-    return .onScreen(placement, isPanelInPlace: isPanelRightNext(to: windowsNext, pid: pid, panel: panel))
+    return .onScreen(placement, isPanelInPlace: isPanelRightNext(to: windowsNext, pid: pid, panel: panel, ignoring: flashPanels))
 }
 
 /// - Parameter windows: the windows next to the window on the side of the panel, nearest first
+/// - Parameter flashPanels: the panels of the move flash (see `MoveFlash`): next to a window for a moment, they don't cover
+///   the border
 /// - Returns: the panel is the nearest of them, apart from the window's own app (an app may keep a helper window right
 ///   next to its window). Only the normal layer counts (not the desktop, the menu bar or the Dock)
-func isPanelRightNext(to windows: [StackedWindow], pid: pid_t, panel: CGWindowID?) -> Bool {
+func isPanelRightNext(to windows: [StackedWindow], pid: pid_t, panel: CGWindowID?, ignoring flashPanels: Set<Int> = []) -> Bool {
     guard let panel else { return false }
-    for window in windows where window.layer == 0 {
+    for window in windows where window.layer == 0 && !(window.number.map(flashPanels.contains) ?? false) {
         if window.number == Int(panel) { return true }
         if window.pid != pid { return false }
     }
@@ -298,6 +302,10 @@ final class MoveFlash {
 
     private init() {}
 
+    /// The panels of the flash on the screen: next to a window for a moment, they don't count where the focus border checks
+    /// that its panel is right next to the focused window
+    var shownPanelNumbers: Set<Int> { Set(panels.lazy.filter(\.isVisible).map(\.windowNumber)) }
+
     /// The windows flash when the refresh session has laid them out (see ``flashPending()``)
     func flashAfterLayout(_ windows: [Window]) {
         if isUnitTest || !config.focusBorder.enabled { return }
@@ -310,26 +318,27 @@ final class MoveFlash {
         pending = []
         guard !windows.isEmpty, TrayMenuModel.shared.isEnabled, !MissionControl.isActive else { return }
         let border = config.focusBorder.with(\.width, config.focusBorder.width * 2)
-        let frames: [CGRect] = windows.compactMap { window in
-            guard let window = window as? MacWindow, let windowFrame = window.focusBorderRect else { return nil }
+        let flashes: [(frame: CGRect, nativeWindowId: UInt32)] = windows.compactMap { window in
+            guard let window = window as? MacWindow,
+                  let nativeWindowId = window.macApp.nativeWindowId(of: window.windowId),
+                  let windowFrame = window.focusBorderRect
+            else { return nil }
             let windowRect = focusBorderWindowRect(windowFrame, monitor: window.nodeMonitorInfo?.rect, borderWidth: border.width)
             guard windowRect.width > 0, windowRect.height > 0 else { return nil }
-            return focusBorderPanelFrame(windowRect: windowRect, borderWidth: border.width, mainMonitorHeight: mainMonitorInfo.height)
+            return (focusBorderPanelFrame(windowRect: windowRect, borderWidth: border.width, mainMonitorHeight: mainMonitorInfo.height), nativeWindowId)
         }
-        guard !frames.isEmpty else { return }
-        while panels.count < frames.count {
-            let panel = FocusBorderPanel()
-            panel.level = .floating // Above the windows for a moment, no stacking next to a window like the focus border
-            panels.append(panel)
-        }
-        let shown = Array(panels.prefix(frames.count))
-        for (panel, frame) in zip(shown, frames) {
-            panel.draw(size: frame.size, border)
-            panel.setFrame(frame, display: false)
+        guard !flashes.isEmpty else { return }
+        while panels.count < flashes.count { panels.append(FocusBorderPanel()) }
+        let shown = Array(panels.prefix(flashes.count))
+        for (panel, flash) in zip(shown, flashes) {
+            panel.draw(size: flash.frame.size, border)
+            panel.setFrame(flash.frame, display: false)
             panel.alphaValue = 1
-            panel.orderFrontRegardless()
+            // Right below the window like the focus border: it shows in the gap around the window, nothing of MarSpace covers
+            // the window (a secure dialog over it keeps its buttons, see FocusBorderPlacement)
+            panel.order(.below, relativeTo: Int(flash.nativeWindowId))
         }
-        for panel in panels.dropFirst(frames.count) { panel.orderOut(nil) }
+        for panel in panels.dropFirst(flashes.count) { panel.orderOut(nil) }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.45
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)

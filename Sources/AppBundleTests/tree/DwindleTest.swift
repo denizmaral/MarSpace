@@ -291,6 +291,24 @@ struct DwindleTest {
         assertEquals(root.children.map { $0.getWeight(.h) }, [420, 1500])
     }
 
+    /// A minimized window remembers its place in the tree, its anchor went along with the tile too
+    @Test func testAMinimizedWindowGivesTheWeightToTheTileThatItSplit() async {
+        let workspace = Workspace.get(byName: name)
+        let root = workspace.rootTilingContainer
+        let window1 = TestWindow.new(id: 1, parent: root, adaptiveWeight: 420)
+        TestWindow.new(id: 2, parent: root, adaptiveWeight: 1500) // 1500x1080 (wide)
+        let window3 = await tileNewWindow(3, workspace)
+        window3.enterMacosNativeState(macosMinimizedWindowsContainer, prevParentKind: .tilingContainer, adaptiveWeight: 1)
+        assertEquals(root.layoutDescription, .h_tiles([.window(1), .window(2)]))
+
+        assertEquals(window1.focusWindow(), true)
+        await parseCommand("swap right").cmdOrDie.run(.defaultEnv, .emptyStdin)
+        assertEquals(root.layoutDescription, .h_tiles([.window(2), .window(1)]))
+        window3.closeAxWindow()
+        workspace.normalizeContainers()
+        assertEquals(root.children.map { $0.getWeight(.h) }, [420, 1500])
+    }
+
     @Test func testAWindowThatMovesOutOfItsContainerGivesTheWeightBack() async {
         let workspace = Workspace.get(byName: name)
         let root = workspace.rootTilingContainer
