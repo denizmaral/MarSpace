@@ -47,11 +47,11 @@ binding main alt-ctrl-shift-d: move-node-to-workspace D
 binding main alt-ctrl-shift-e: move-node-to-workspace E
 binding main alt-ctrl-shift-f: move-node-to-workspace F
 binding main alt-ctrl-shift-g: move-node-to-workspace G
-binding main alt-ctrl-shift-h: move left
+binding main alt-ctrl-shift-h: swap left || move left
 binding main alt-ctrl-shift-i: move-node-to-workspace I
-binding main alt-ctrl-shift-j: move down
-binding main alt-ctrl-shift-k: move up
-binding main alt-ctrl-shift-l: move right
+binding main alt-ctrl-shift-j: swap down || move down
+binding main alt-ctrl-shift-k: swap up || move up
+binding main alt-ctrl-shift-l: swap right || move right
 binding main alt-ctrl-shift-m: move-node-to-workspace M
 binding main alt-ctrl-shift-n: move-node-to-workspace N
 binding main alt-ctrl-shift-o: move-node-to-workspace O

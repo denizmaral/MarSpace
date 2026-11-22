@@ -11,7 +11,7 @@ window. Change them in Settings › Shortcuts; settings that exist already keep 
 | Shortcut | What it does |
 |---|---|
 | ⌃⌥ ← ↓ ↑ → | Focus the window in that direction |
-| ⌃⌥⇧ ← ↓ ↑ → | Move the window in that direction |
+| ⌃⌥⇧ ← ↓ ↑ → | Move the window: it trades places with the window in that direction, and takes the whole edge at the edge of the screen |
 | ⌃⌥ and 1 … 9 or A … Z | Go to the workspace with that name |
 | ⌃⌥⇧ and 1 … 9 or A … Z | Move the window to that workspace |
 | ⌃⌥ ⇥ | Go back to the previous workspace |
@@ -38,14 +38,21 @@ MarSpace arranges the windows of a workspace in a tree, like [i3](https://i3wm.o
 
 ![A more complex tree](./assets/tree.png)
 
-You move around the tree in four directions with the **Focus** shortcuts, and change it with **Move** (swap a window
-with its neighbor, or move it out of its container) and **Join with** (put two windows into a new container).
+You move around the tree in four directions with the **Focus** shortcuts, and change it with **Move** and **Join with**
+(put two windows into a new container).
+
+**Move** trades the places of the window and its neighbor: the tiles stay where they are, the windows (and their
+sizes) change places. The neighbor is the window on that side that shares the most of the edge, the top or left one if
+several share the same. Right after a move, the opposite direction moves the window back. At the edge of the
+workspace, where the window has no neighbor, it takes the whole edge: e.g. two windows side by side are put on top of
+each other, and a window at the bottom becomes a row as wide as the screen. The command line `move left` (a custom
+action) moves a window through the tree like i3 does.
 
 Shortcuts can also do what Hyprland users know by other names (Settings › Shortcuts, the action menu):
 
 - **Cycle through the windows**: the next or the previous window of the workspace, and around at the end (`cyclenext`)
 - **Focus the last focused window**: back to the window that had the focus before, and forth again (`focuscurrentorlast`)
-- **Swap with a window**: the window and its neighbor change places, their containers stay as they are (`swapwindow`)
+- **Swap with a window**: like **Move**, but nothing happens at the edge of the workspace (`swapwindow`)
 - **Move the window to a workspace**, with **Go there too**: the window goes and you follow it (`movetoworkspace`), or
   it goes and you stay (`movetoworkspacesilent`)
 

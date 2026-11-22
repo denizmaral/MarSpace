@@ -96,6 +96,7 @@ func swapWindows(mruDominant window1: Window, _ window2: Window) {
 
     window2.bind(to: binding1.parent, adaptiveWeight: binding1.adaptiveWeight, index: binding1.index)
     window1.bind(to: binding2.parent, adaptiveWeight: binding2.adaptiveWeight, index: binding2.index)
+    window1.swapDwindleSplitAnchors(with: window2)
 }
 
 extension CGPoint {

@@ -45,6 +45,7 @@ struct SettingsTest {
         assertEquals(Action.resize(.width, .add(50)).commandLine, "resize width +50")
         assertEquals(Action.cycleFocus(.previous).commandLine, "focus --boundaries-action wrap-around-the-workspace dfs-prev")
         assertEquals(Action.moveWindowToWorkspaceAndFollow("T").commandLine, "move-node-to-workspace --focus-follows-window T")
+        assertEquals(Action.move(.left).commandLine, "swap left || move left")
         guard case .failure = Action.layout([]).command else { Issue.record("A layout command without a layout"); return }
     }
 
@@ -107,7 +108,8 @@ struct SettingsTest {
         let bindings = config.modes[mainModeId]?.bindings ?? [:]
         // The arrow keys, not H, J, K and L: those are workspaces like the other letters
         assertEquals(bindings["alt-ctrl-left"]?.commands.shellOfCommandsDescription, "focus left")
-        assertEquals(bindings["alt-ctrl-shift-down"]?.commands.shellOfCommandsDescription, "move down")
+        // The window trades places with its neighbor, and takes the whole edge at the edge of the workspace
+        assertEquals(bindings["alt-ctrl-shift-down"]?.commands.shellOfCommandsDescription, "swap down || move down")
         assertEquals(bindings["alt-ctrl-h"]?.commands.shellOfCommandsDescription, "workspace H")
         assertEquals(bindings["alt-ctrl-shift-l"]?.commands.shellOfCommandsDescription, "move-node-to-workspace L")
     }

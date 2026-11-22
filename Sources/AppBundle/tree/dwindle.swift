@@ -260,6 +260,17 @@ extension Window {
         }
     }
 
+    /// The two windows traded places (see `swapWindows`). The weight that a window took from its anchor belongs to its tile,
+    /// and so does the weight that an anchor gave: the anchors go along with the tiles
+    @MainActor
+    func swapDwindleSplitAnchors(with other: Window) {
+        func swapped(_ node: TreeNode?) -> TreeNode? { node === self ? other : node === other ? self : node }
+        (dwindleSplitAnchor, other.dwindleSplitAnchor) = (swapped(other.dwindleSplitAnchor), swapped(dwindleSplitAnchor))
+        for window in nodeWorkspace?.allLeafWindowsRecursive ?? [] where window !== self && window !== other {
+            window.dwindleSplitAnchor = swapped(window.dwindleSplitAnchor)
+        }
+    }
+
     /// See `dwindleSplitAnchor`
     @MainActor
     func returnWeightToDwindleSplitAnchor() {

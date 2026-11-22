@@ -131,6 +131,7 @@ private let moveOutMacosUnconventionalWindow = "moving macOS fullscreen, minimiz
         case .tilingContainer(let parent):
             check(parent.orientation == direction.orientation)
             guard let ownIndex = proposedSibling.ownIndex(in: .all) else { return .fail(io.err(bugPrompt())) }
+            window.returnWeightToDwindleSplitAnchor() // It leaves its container
             window.bind(to: parent, adaptiveWeight: WEIGHT_AUTO, index: ownIndex + direction.insertionOffset)
             return .succ
         case .workspace(let parent):
@@ -143,6 +144,7 @@ private let moveOutMacosUnconventionalWindow = "moving macOS fullscreen, minimiz
     _ workspace: Workspace,
     _ direction: CardinalDirection,
 ) {
+    window.returnWeightToDwindleSplitAnchor() // It leaves its container
     let prevRoot = workspace.rootTilingContainer
     prevRoot.unbindFromParent()
     // Force tiles layout
@@ -154,6 +156,7 @@ private let moveOutMacosUnconventionalWindow = "moving macOS fullscreen, minimiz
 
 @MainActor private func deepMoveIn(window: Window, into container: TilingContainer, moveDirection: CardinalDirection, _ io: CmdIo) -> BinaryExitCode {
     let deepTarget = container.tilingTreeNodeCasesOrDie().findDeepMoveInTargetRecursive(moveDirection.orientation)
+    window.returnWeightToDwindleSplitAnchor() // It leaves its container
     switch deepTarget {
         case .tilingContainer(let deepTarget):
             window.bind(to: deepTarget, adaptiveWeight: WEIGHT_AUTO, index: 0)

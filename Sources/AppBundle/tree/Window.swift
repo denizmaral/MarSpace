@@ -17,6 +17,8 @@ open class Window: TreeNode, Hashable {
     var lifeStatus: WindowLifeStatus = .alive
     /// The sibling that gave half of its weight to this window (see `applyDwindleSplit`). It takes the weight back on close
     weak var dwindleSplitAnchor: TreeNode? = nil
+    /// The last `swap` of the window in a direction: the opposite direction right after it swaps the windows back
+    var lastDirectionalSwap: DirectionalSwap? = nil
     /// See ``setAxFrame(_:_:readBack:)``
     private var sentFrame: SentFrame? = nil
     /// Where the window is on the screen, as far as AeroSpace knows, without accessibility calls. Unlike the tile
