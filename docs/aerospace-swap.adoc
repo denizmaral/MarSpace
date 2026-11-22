@@ -41,7 +41,9 @@ Wrap around if the window is at the edge of the workspace (for `(left|down|up|ri
 include::./util/conditional-arguments-header.adoc[]
 
 (left|down|up|right)::
-Swaps the focused window with the nearest window in the given direction.
+Swaps the focused window with the nearest window in the given direction: of the windows on that side, the one that
+shares the most of the edge with the focused window. The top or left one if several share the same, and the window
+that an accordion shows. Right after a swap, the opposite direction swaps the two windows back.
 
 (dfs-next|dfs-prev)::
 Swaps the focused window with the next or previous window in the depth-first order (top-to-bottom and left-to-right) of windows in the current workspace tree.

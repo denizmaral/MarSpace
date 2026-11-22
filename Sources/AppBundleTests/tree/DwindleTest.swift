@@ -271,6 +271,40 @@ struct DwindleTest {
         await tileNewWindow(4, workspace)
         assertEquals(root.layoutDescription, .h_tiles([.window(1), .v_tiles([.window(2), .h_tiles([.window(3), .window(4)])])]))
     }
+
+    @Test func testSwappedWindowsKeepTheWeightOfTheirTiles() async {
+        let workspace = Workspace.get(byName: name)
+        let root = workspace.rootTilingContainer
+        let window1 = TestWindow.new(id: 1, parent: root, adaptiveWeight: 420)
+        TestWindow.new(id: 2, parent: root, adaptiveWeight: 1500) // 1500x1080 (wide)
+        let window3 = await tileNewWindow(3, workspace)
+        assertEquals(root.children.map { $0.getWeight(.h) }, [420, 750, 750])
+
+        // The tile that gave half of its weight to 3 holds 1 now
+        assertEquals(window1.focusWindow(), true)
+        await parseCommand("swap right").cmdOrDie.run(.defaultEnv, .emptyStdin)
+        assertEquals(root.layoutDescription, .h_tiles([.window(2), .window(1), .window(3)]))
+
+        window3.closeAxWindow()
+        workspace.normalizeContainers()
+        assertEquals(root.layoutDescription, .h_tiles([.window(2), .window(1)]))
+        assertEquals(root.children.map { $0.getWeight(.h) }, [420, 1500])
+    }
+
+    @Test func testAWindowThatMovesOutOfItsContainerGivesTheWeightBack() async {
+        let workspace = Workspace.get(byName: name)
+        let root = workspace.rootTilingContainer
+        TestWindow.new(id: 1, parent: root, adaptiveWeight: 420)
+        TestWindow.new(id: 2, parent: root, adaptiveWeight: 1500) // 1500x1080 (wide)
+        await tileNewWindow(3, workspace)
+        assertEquals(root.children.map { $0.getWeight(.h) }, [420, 750, 750])
+
+        // At the top edge: 3 takes the whole edge, 2 gets its space back
+        await parseCommand("move up").cmdOrDie.run(.defaultEnv, .emptyStdin)
+        workspace.normalizeContainers()
+        assertEquals(workspace.rootTilingContainer.layoutDescription, .v_tiles([.window(3), .h_tiles([.window(1), .window(2)])]))
+        assertEquals(root.children.map { $0.getWeight(.h) }, [420, 1500])
+    }
 }
 
 /// Windows detected at the same time: the callbacks of a detected window suspend (e.g. on-window-detected reads the

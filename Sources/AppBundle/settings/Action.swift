@@ -11,6 +11,8 @@ enum Action: Codable, Sendable, Equatable {
     case cycleFocus(Cycle)
     /// The window that had the focus before (Hyprland's `focuscurrentorlast`)
     case focusBackAndForth
+    /// The window trades places with its neighbor (`swap`). At the edge of the workspace, where it has no neighbor, it takes
+    /// the whole edge (`move`): e.g. two windows side by side are put on top of each other
     case move(CardinalDirection)
     /// The window and its neighbor change places, their containers stay as they are (Hyprland's `swapwindow`)
     case swap(CardinalDirection)
@@ -123,15 +125,29 @@ enum Action: Codable, Sendable, Equatable {
         }
     }
 
+    /// What the action tries first: its own command runs only if that fails (`||`)
+    private var attemptedFirst: Action? {
+        switch self {
+            case .move(let direction): .swap(direction)
+            default: nil
+        }
+    }
+
     /// The command line of the action: shown in the settings window, and where a custom command line starts from
     var commandLine: String {
         if case .custom(let line) = self { return line }
-        return words.map(\.shellQuoted).joined(separator: " ")
+        let line = words.map(\.shellQuoted).joined(separator: " ")
+        return attemptedFirst.map { "\($0.commandLine) || \(line)" } ?? line
     }
 
     /// The engine command. A typed action builds it from its values, nothing is parsed; its words are kept for what the
     /// command prints (e.g. `aerospace config`, the logs). A custom command line is parsed
     @MainActor var command: ParsedCmd<Shell<any Command>> {
+        guard let first = attemptedFirst?.command else { return ownCommand }
+        return first.flatMap { first in ownCommand.map { .or([first, $0]) } }
+    }
+
+    @MainActor private var ownCommand: ParsedCmd<Shell<any Command>> {
         let rawArgs = Array(words.dropFirst())
         let args: any CmdArgs
         switch self {
