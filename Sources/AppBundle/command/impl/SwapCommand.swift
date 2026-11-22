@@ -47,8 +47,10 @@ struct SwapCommand: Command {
             return .fail
         }
 
+        let pointer = PointerOnWindow(currentWindow)
         swapWindows(mruDominant: currentWindow, targetWindow)
         MoveFlash.shared.flashAfterLayout([currentWindow, targetWindow])
+        pointer?.followAfterLayout()
         if case .direction(let direction) = args.target.val {
             currentWindow.lastDirectionalSwap = DirectionalSwap(of: currentWindow, with: targetWindow, direction)
         }
