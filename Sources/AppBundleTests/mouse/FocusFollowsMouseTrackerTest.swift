@@ -78,8 +78,8 @@ struct FocusFollowsMouseTrackerTest {
         // Across the windows
         assertEquals(workspace.windowsUnderMouse(CGPoint(x: 1200, y: 540)).map(\.windowId), [1, 2])
         assertEquals(moved(over: workspace.windowsThatTheMouseMayFocus(CGPoint(x: 1200, y: 540)), focused: front, at: 50), .stay)
-        // A check that started before the workspace floated
-        focusFollowsMouse(to: back, ifTheFocusDidntChangeSince: focusChangesByOtherMeans)
+        // The session of a check that chose a window before the workspace floated
+        focusFollowsMouse(to: back, ifNothingChangedSince: .now)
         assertEquals(globalFocus.windowOrNil, front)
 
         await parseCommand("workspace-layout tiling").cmdOrDie.run(.defaultEnv, .emptyStdin)
@@ -91,6 +91,25 @@ struct FocusFollowsMouseTrackerTest {
         assertEquals(moved(over: [front], focused: front, at: 700), .leave)
         assertEquals(moved(over: [back], focused: front, at: 800), .enter)
         assertEquals(mouseTracker.checked(real: back, focused: front, focusChanges: focusChangesByOtherMeans, now: at(805)), back)
+    }
+
+    /// A check chose the left window, then a shortcut switched the layout before the session of the check ran. The
+    /// shortcut keeps the focus where it is: the window under the resting mouse isn't focused (its column would scroll the
+    /// screen to it)
+    @Test func testAWindowChosenBeforeALayoutSwitchIsntFocused() async throws {
+        let workspace = Workspace.get(byName: name)
+        let left = TestWindow.new(id: 1, parent: workspace.rootTilingContainer)
+        let right = TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
+        #expect(right.focusWindow())
+        let checkpoint = FocusFollowsMouseCheckpoint.now // The check found the left window under the mouse
+
+        await parseCommand("workspace-layout scrolling").cmdOrDie.run(.defaultEnv, .emptyStdin)
+        try await workspace.layoutWorkspace()
+        focusFollowsMouse(to: left, ifNothingChangedSince: checkpoint)
+        assertEquals(globalFocus.windowOrNil, right)
+
+        focusFollowsMouse(to: left, ifNothingChangedSince: .now) // A check after the switch
+        assertEquals(globalFocus.windowOrNil, left)
     }
 
     /// GitHub Desktop (left, focused) covers a strip of App Store. The mouse moves over the strip into App Store
@@ -239,10 +258,10 @@ struct FocusFollowsMouseTrackerTest {
         let mail = TestWindow.new(id: 2, parent: Workspace.get(byName: "M").rootTilingContainer)
         _ = terminal.focusWindow()
         updateFocusCache(terminal)
-        let focusChanges = focusChangesByOtherMeans // The check found Terminal under the mouse
+        let checkpoint = FocusFollowsMouseCheckpoint.now // The check found Terminal under the mouse
 
         updateFocusCache(mail) // The session takes over the macOS focus
-        focusFollowsMouse(to: terminal, ifTheFocusDidntChangeSince: focusChanges)
+        focusFollowsMouse(to: terminal, ifNothingChangedSince: checkpoint)
         assertEquals(globalFocus.windowOrNil, mail)
         assertEquals(globalFocus.workspace.name, "M")
     }
@@ -252,12 +271,12 @@ struct FocusFollowsMouseTrackerTest {
         let (first, second, _) = windows()
         _ = first.focusWindow()
         updateFocusCache(first)
-        let focusChanges = focusChangesByOtherMeans
+        let checkpoint = FocusFollowsMouseCheckpoint.now
 
-        focusFollowsMouse(to: second, ifTheFocusDidntChangeSince: focusChanges)
+        focusFollowsMouse(to: second, ifNothingChangedSince: checkpoint)
         updateFocusCache(second)
         assertEquals(globalFocus.windowOrNil, second)
-        assertEquals(focusChangesByOtherMeans, focusChanges)
+        assertEquals(focusChangesByOtherMeans, checkpoint.focusChanges)
     }
 
     /// The mouse moves fast: focus-follows-mouse focuses the first window while the second one is checked

@@ -117,7 +117,7 @@ struct ScrollingLayoutTest {
         let other = TestWindow.new(id: 3, parent: workspace.floatingWindowsContainer)
         assertEquals(tracker.mouseMoved(over: [other], focused: shown, focusChanges: 0, now: .now, frontmost: { nil }), .enter)
         assertEquals(tracker.checked(real: hidden, focused: shown, focusChanges: 0, now: .now), nil)
-        focusFollowsMouse(to: hidden, ifTheFocusDidntChangeSince: focusChangesByOtherMeans)
+        focusFollowsMouse(to: hidden, ifNothingChangedSince: .now)
         assertEquals(globalFocus.windowOrNil, shown)
         assertEquals(globalFocus.workspace, workspace)
     }
@@ -132,9 +132,9 @@ struct ScrollingLayoutTest {
         try await workspace.layoutWorkspace()
         assertEquals(third.isParkedOffTheScreen, true)
 
-        focusFollowsMouse(to: third, ifTheFocusDidntChangeSince: focusChangesByOtherMeans)
+        focusFollowsMouse(to: third, ifNothingChangedSince: .now)
         assertEquals(globalFocus.windowOrNil, first)
-        focusFollowsMouse(to: second, ifTheFocusDidntChangeSince: focusChangesByOtherMeans)
+        focusFollowsMouse(to: second, ifNothingChangedSince: .now)
         assertEquals(globalFocus.windowOrNil, second)
     }
 
