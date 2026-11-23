@@ -53,22 +53,42 @@ import Common
             let target = mouseTracker.checked(real: real, focused: globalFocus.windowOrNil, focusChanges: focusChangesByOtherMeans, now: .now)
             focusLogger.info("ffm checked: real \(real?.windowId.description ?? "nil", privacy: .public), focused \(globalFocus.windowOrNil?.windowId.description ?? "nil", privacy: .public), focus changes \(focusChangesByOtherMeans), focuses \(target?.windowId.description ?? "nothing", privacy: .public)")
             guard let target else { return }
-            let focusChanges = focusChangesByOtherMeans
+            let checkpoint = FocusFollowsMouseCheckpoint.now
             // Not canceled by later mouse moves: the tracker took the window as the one under the mouse, it wouldn't try again
             Task.startUnstructured { @MainActor in
                 try await runLightSession(.focusFollowsMouse, token) {
-                    focusFollowsMouse(to: target, ifTheFocusDidntChangeSince: focusChanges)
+                    focusFollowsMouse(to: target, ifNothingChangedSince: checkpoint)
                 }
             }
         }
     }
 }
 
+/// What the window that a check of focus-follows-mouse chose depends on: it isn't focused if that changed before the
+/// session of the check runs
+struct FocusFollowsMouseCheckpoint {
+    /// ``focusChangesByOtherMeans``: the later action wins
+    let focusChanges: UInt
+    /// ``focusFollowsMouseResets``: the windows under the mouse changed without the mouse
+    let resets: UInt
+
+    @MainActor static var now: Self { Self(focusChanges: focusChangesByOtherMeans, resets: focusFollowsMouseResets) }
+}
+
+/// Counts ``resetFocusFollowsMouse(because:)``. A reset cancels the check that runs, not the session that focuses the
+/// window that a check chose: e.g. a shortcut that switches the workspace layout keeps the focus where it is, its
+/// session can run between the check and that session
+@MainActor private(set) var focusFollowsMouseResets: UInt = 0
+
 /// The session starts with the macOS focus, which may have changed since the check: e.g. an app that was just launched
 /// focused its window (moved to another workspace by its window rule). The later action wins
-@MainActor func focusFollowsMouse(to window: Window, ifTheFocusDidntChangeSince focusChanges: UInt) {
-    guard focusChangesByOtherMeans == focusChanges else {
+@MainActor func focusFollowsMouse(to window: Window, ifNothingChangedSince checkpoint: FocusFollowsMouseCheckpoint) {
+    guard focusChangesByOtherMeans == checkpoint.focusChanges else {
         focusLogger.info("ffm yields to the focus of \(globalFocus.windowOrNil?.windowId.description ?? "nil", privacy: .public)")
+        return
+    }
+    guard focusFollowsMouseResets == checkpoint.resets else {
+        focusLogger.info("ffm drops \(window.windowId.description, privacy: .public): the windows under the mouse changed without the mouse")
         return
     }
     // A layout since the check (e.g. a resize) may have moved its column off the screen, another workspace is shown, or
@@ -83,6 +103,7 @@ import Common
 /// focus comes back from a window in macOS fullscreen (see ``checkOnFocusChangedCallbacks_nonCancellable()``)
 @MainActor func resetFocusFollowsMouse(because reason: StaticString) {
     focusLogger.info("ffm takes the next windows as they are: \(reason, privacy: .public)")
+    focusFollowsMouseResets &+= 1
     focusFollowsTask?.cancel()
     mouseTracker.takeTheNextWindowsAsTheyAre()
 }
