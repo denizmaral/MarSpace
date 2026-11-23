@@ -57,6 +57,42 @@ struct FocusFollowsMouseTrackerTest {
         #expect(FocusFollowsMouseTracker.mayFocus(left, from: nil)) // Nothing focused
     }
 
+    /// The windows of a floating workspace overlap, and the window that gets the focus comes to the front: on its way to a
+    /// window, the mouse would bring the windows that it crosses over it. The mouse is over no window there. When the
+    /// workspace tiles again, the window under the resting mouse is taken as it is, the mouse that enters another one
+    /// focuses it
+    @Test func testTheFocusDoesntFollowTheMouseOnAFloatingWorkspace() async throws {
+        let workspace = Workspace.get(byName: name)
+        let back = TestWindow.new(id: 1, parent: workspace.rootTilingContainer)
+        let front = TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
+        #expect(front.focusWindow())
+        mouseTracker = FocusFollowsMouseTracker()
+        await parseCommand("workspace-layout floating").cmdOrDie.run(.defaultEnv, .emptyStdin)
+        Workspace.applyFloatingLayouts()
+        try await workspace.layoutWorkspace()
+
+        let mouse = CGPoint(x: 600, y: 540) // Over both floating windows, over the left tile when the workspace tiles
+        assertEquals(workspace.windowsUnderMouse(mouse).map(\.windowId), [1, 2])
+        assertEquals(workspace.windowsThatTheMouseMayFocus(mouse), [])
+        assertEquals(moved(over: workspace.windowsThatTheMouseMayFocus(mouse), focused: front, at: 0), .leave) // The switch
+        // Across the windows
+        assertEquals(workspace.windowsUnderMouse(CGPoint(x: 1200, y: 540)).map(\.windowId), [1, 2])
+        assertEquals(moved(over: workspace.windowsThatTheMouseMayFocus(CGPoint(x: 1200, y: 540)), focused: front, at: 50), .stay)
+        // A check that started before the workspace floated
+        focusFollowsMouse(to: back, ifTheFocusDidntChangeSince: focusChangesByOtherMeans)
+        assertEquals(globalFocus.windowOrNil, front)
+
+        await parseCommand("workspace-layout tiling").cmdOrDie.run(.defaultEnv, .emptyStdin)
+        Workspace.applyFloatingLayouts()
+        try await workspace.layoutWorkspace()
+        assertEquals(workspace.windowsThatTheMouseMayFocus(mouse), [back])
+        assertEquals(moved(over: [back], focused: front, at: 100), .leave)
+        assertEquals(moved(over: [back], focused: front, at: 600), .stay)
+        assertEquals(moved(over: [front], focused: front, at: 700), .leave)
+        assertEquals(moved(over: [back], focused: front, at: 800), .enter)
+        assertEquals(mouseTracker.checked(real: back, focused: front, focusChanges: focusChangesByOtherMeans, now: at(805)), back)
+    }
+
     /// GitHub Desktop (left, focused) covers a strip of App Store. The mouse moves over the strip into App Store
     @Test func testFocusFollowsAcrossTheRealBorderOfAWiderNeighbor() {
         let (gitHub, appStore, _) = windows()

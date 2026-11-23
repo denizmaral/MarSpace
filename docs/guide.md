@@ -143,7 +143,9 @@ command line: `aerospace workspace-layout tiling scrolling floating`.
 - **Floating**: every window floats. The tiles go to the middle of the screen, a bit apart from each other; windows that
   open on the workspace, or that you move there, float too. A window that you move to a workspace that tiles is a
   tile there. Dialogs and windows that you made floating yourself stay floating when the workspace tiles again; Change
-  the layout › Tiling makes a window a tile on the floating workspace
+  the layout › Tiling makes a window a tile on the floating workspace. The focus doesn't follow the mouse there: the
+  windows overlap, and the window that gets the focus comes to the front, over the one that the mouse is on its way to.
+  Click a window to focus it
 
 After a switch, a small hint on the screen shows which layout the workspace is in.
 

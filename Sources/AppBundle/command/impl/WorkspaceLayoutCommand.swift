@@ -19,6 +19,10 @@ struct WorkspaceLayoutCommand: Command {
                 : .succ(io.err("The workspace is \(current.rawValue) already. Tip: use --fail-if-noop to exit with non-zero exit code"))
         }
         workspace.setWorkspaceLayout(next)
+        // Other windows under the resting mouse: not focused until the mouse enters another window. A column that it
+        // focused would scroll the screen to it, a window of a workspace that tiles again would take the focus from the
+        // window that had it while the workspace floated (see `letsTheFocusFollowTheMouse`)
+        if workspace.isVisible { resetFocusFollowsMouse(because: "the workspace layout changed") }
         if workspace.isVisible && !isUnitTest { WorkspaceLayoutHud.shared.show(next, of: workspace) }
         return .succ
     }
