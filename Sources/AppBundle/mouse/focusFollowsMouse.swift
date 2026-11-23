@@ -26,7 +26,7 @@ import Common
         guard let token: RunSessionGuard = .isServerEnabled, !MissionControl.isActive else { return }
         let location = event.locationInWindow.withYAxisFlipped
         // MarSpace's own windows (the settings window, the menu) are above the windows that it manages
-        let windows = isOverOwnWindow(event.locationInWindow) ? [] : location.monitorApproximation.visibleWorkspace.windowsUnderMouse(location)
+        let windows = isOverOwnWindow(event.locationInWindow) ? [] : location.monitorApproximation.visibleWorkspace.windowsThatTheMouseMayFocus(location)
         let move = mouseTracker.mouseMoved(
             over: windows, focused: globalFocus.windowOrNil, focusChanges: focusChangesByOtherMeans, now: .now,
             frontmost: { frontmostWindow(of: windows) },
@@ -71,8 +71,9 @@ import Common
         focusLogger.info("ffm yields to the focus of \(globalFocus.windowOrNil?.windowId.description ?? "nil", privacy: .public)")
         return
     }
-    // A layout since the check (e.g. a resize) may have moved its column off the screen, or another workspace is shown
-    guard !window.isWaitingInACorner else { return }
+    // A layout since the check (e.g. a resize) may have moved its column off the screen, another workspace is shown, or
+    // the workspace floats now
+    guard !window.isWaitingInACorner, window.nodeWorkspace?.letsTheFocusFollowTheMouse != false else { return }
     _ = window.focusWindow()
     window.nativeFocus()
 }
@@ -221,6 +222,19 @@ struct FocusFollowsMouseTracker {
 }
 
 extension Workspace {
+    /// Not on a floating workspace: its windows overlap, and focusing a window brings it to the front (in macOS there is
+    /// no focus without raising). The mouse on its way to a window would bring every window that it crosses to the front,
+    /// over the window that it goes to. A click focuses a window there
+    @MainActor
+    var letsTheFocusFollowTheMouse: Bool { !isFloatingLayout }
+
+    /// The windows under the mouse that focus-follows-mouse may focus: none where the workspace doesn't let the focus
+    /// follow the mouse. The mouse is over no window there, the first window that it enters on another monitor is focused
+    @MainActor
+    func windowsThatTheMouseMayFocus(_ location: CGPoint) -> [Window] {
+        letsTheFocusFollowTheMouse ? windowsUnderMouse(location) : []
+    }
+
     /// In-memory hit testing against the observed frames. No accessibility calls
     @MainActor
     func windowsUnderMouse(_ location: CGPoint) -> [Window] {

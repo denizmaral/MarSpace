@@ -159,7 +159,7 @@ private struct GeneralPane: View {
             Section {
                 Toggle(isOn: $general.focusFollowsMouse) {
                     Text("Focus follows the mouse")
-                    Text("A window gets the focus when the mouse enters it")
+                    Text("A window gets the focus when the mouse enters it. Not on a floating workspace, where the windows overlap: click a window there")
                 }
                 Toggle(isOn: $general.startAtLogin) {
                     Text("Open at login")
