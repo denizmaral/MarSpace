@@ -39,7 +39,8 @@ extension WindowDrop {
             return workspace == window.nodeWorkspace ? nil : .into(workspace)
         }
         if isRearranging, root.layout == .tiles, let edge = visibleRect.edge(near: point, share: edgeShare) {
-            return .edge(workspace, edge)
+            // A window that already lies along the whole edge stays where it is
+            return window.liesAlongTheWholeEdge(edge, of: root) ? nil : .edge(workspace, edge)
         }
         // The virtual rects leave no gaps between the tiles: the target doesn't flicker on the way across a gap. The dragged
         // window keeps the virtual rect of its tile during the drag (the layout leaves it alone)
@@ -131,6 +132,13 @@ extension WindowDrop {
 }
 
 extension Window {
+    /// The window is the first (or the last) child of the root along §edge§: it takes the whole edge already
+    @MainActor
+    fileprivate func liesAlongTheWholeEdge(_ edge: CardinalDirection, of root: TilingContainer) -> Bool {
+        let children = root.inhabitedChildren
+        return parent === root && root.orientation == edge.orientation && (edge.isPositive ? children.last : children.first) === self
+    }
+
     /// The window leaves its place in the tiling tree for another one: its dwindle split anchor takes its weight back, and
     /// the container that it leaves is normalized (e.g. flattened, if one child is left) before it's put elsewhere
     @MainActor

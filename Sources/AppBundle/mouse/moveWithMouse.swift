@@ -69,8 +69,14 @@ private func moveTilingWindow(_ window: Window) async throws {
     // The last session of a drag may run after the mouse button was released: the drag doesn't start again (see
     // refreshModel_nonCancellable)
     guard isLeftMouseButtonDown else { return }
+    windowIsMovedWithMouse(window, isResized: isResized)
+}
+
+/// The layout leaves the window alone while the mouse moves it. It keeps its tile (`lastAppliedLayoutPhysicalRect`): a
+/// resize of the left or the top edge, which moves the window too, is measured from it (see `resizeWithMouse`)
+@MainActor
+func windowIsMovedWithMouse(_ window: Window, isResized: Bool) {
     currentlyManipulatedWithMouseWindowId = window.windowId
-    window.lastAppliedLayoutPhysicalRect = nil
     if !isResized { WindowDrag.shared.begin(window) }
 }
 
@@ -78,7 +84,7 @@ private func moveTilingWindow(_ window: Window) async throws {
 /// when the mouse button is released (``WindowDrop``, see `endManipulationWithMouse`), and ``DropPreview`` shows the place
 /// meanwhile.
 ///
-/// A quick drag swaps the window with the window under the mouse. Once the mouse was held still for a second
+/// A quick drag swaps the window with the window under the mouse. Once the mouse was held still for ¾ of a second
 /// (``rearrangeDelay``), the drag rearranges the layout until the button is released: the window goes next to the window
 /// under the mouse, or along the whole edge of the workspace near an edge of the screen. No accessibility notification
 /// comes while the mouse is still: the mouse is polled during the drag
@@ -86,7 +92,7 @@ private func moveTilingWindow(_ window: Window) async throws {
 final class WindowDrag {
     static let shared = WindowDrag()
 
-    static let rearrangeDelay: Duration = .seconds(1)
+    static let rearrangeDelay: Duration = .milliseconds(750)
     /// How far the mouse may move while it's held still: a hand isn't steady
     static let stillDistance: CGFloat = 8
     private static let pollInterval: Duration = .milliseconds(30)
@@ -98,8 +104,13 @@ final class WindowDrag {
     /// The places that the preview shows: of the dragged window, and of the window that it swaps with
     private(set) var preview: [Rect] = []
     private(set) var isRearranging = false
-    /// Where the mouse came to rest, and when
+    /// Where the mouse came to rest, and when. nil until the first poll of the drag
     private var still: (point: CGPoint, since: ContinuousClock.Instant)? = nil
+    /// The tiles of the windows when the preview was made: a layout that changes them during the drag (a window was
+    /// closed) changes the preview too
+    private var previewedLayout: [Rect?] = []
+    /// Where the mouse button is released, in unit tests
+    var releasePointerForTest: CGPoint? = nil
     /// Counts the drags: the poll of a drag that is over stops
     private var generation: UInt = 0
     private var poll: Task<(), any Error>? = nil
@@ -135,16 +146,30 @@ final class WindowDrag {
             still = (pointer, now)
         }
         let drop = WindowDrop.at(pointer, dragging: window, isRearranging: isRearranging)
-        guard drop != self.drop else { return }
+        let layout = laidOutTiles(window, drop)
+        guard drop != self.drop || layout != previewedLayout else { return }
         self.drop = drop
+        previewedLayout = layout
         preview = drop?.tiles(of: window) ?? []
         DropPreview.shared.show(preview, isSwap: drop?.isSwap == true, below: window)
     }
 
-    /// The mouse button was released: the window takes the place that the preview showed, if any
+    /// The tiles of the workspaces that the drop changes, as the last layout left them. Cheap: no layout is tried
+    private func laidOutTiles(_ window: Window, _ drop: WindowDrop?) -> [Rect?] {
+        guard let drop else { return [] }
+        let workspaces = [window.nodeWorkspace, drop.workspace].compactMap { $0 }
+        return (workspaces.first == workspaces.last ? Array(workspaces.prefix(1)) : workspaces)
+            .flatMap { $0.rootTilingContainer.allLeafWindowsRecursive.map(\.lastAppliedLayoutVirtualRect) }
+    }
+
+    /// The mouse button was released: the window takes its place there. The mouse may have moved since the last poll
+    /// (back onto the tile of the window, out of the workspaces), so the place is where the mouse is now, with the mode
+    /// that the preview showed. Only a drag that a poll saw while the button was down (``still``) drops the window: the
+    /// last session of a drag may start one after the release
     func finish() {
         guard let window else { return }
-        let drop = drop
+        let pointer = isUnitTest ? releasePointerForTest : mouseLocation
+        let drop = still == nil ? nil : pointer.map { WindowDrop.at($0, dragging: window, isRearranging: isRearranging) } ?? drop
         end()
         guard let drop, drop.canApply(to: window) else { return }
         drop.apply(to: window)
@@ -160,6 +185,8 @@ final class WindowDrag {
         preview = []
         isRearranging = false
         still = nil
+        previewedLayout = []
+        releasePointerForTest = nil
         DropPreview.shared.hide()
     }
 }

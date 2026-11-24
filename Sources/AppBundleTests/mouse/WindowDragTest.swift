@@ -5,7 +5,7 @@ import Testing
 
 /// A tiling window that is dragged with the mouse takes its new place when the button is released, and a preview shows
 /// the place meanwhile (see WindowDrag). A quick drag swaps it with the window under the mouse, a drag that held the mouse
-/// still for a second rearranges the layout. The preview is the tile that the window gets: the drop is tried on the trees
+/// still for ¾ of a second rearranges the layout. The preview is the tile that the window gets: the drop is tried on the trees
 /// and taken back, nobody sees it. The test monitor is 1920x1080, with the owner's settings: both normalizations, 10 pt gaps
 @MainActor
 @Suite(.serializedGlobally)
@@ -33,9 +33,8 @@ struct WindowDragTest {
 
     /// What moveTilingWindow does when a drag starts
     private func startDragging(_ window: Window) {
-        currentlyManipulatedWithMouseWindowId = window.windowId
-        window.lastAppliedLayoutPhysicalRect = nil
-        drag.begin(window)
+        windowIsMovedWithMouse(window, isResized: false)
+        #expect(drag.window === window)
     }
 
     /// The mouse is held still at `point` long enough: the drag rearranges
@@ -112,18 +111,18 @@ struct WindowDragTest {
         let resting = point(in: third, 0.1, 0.5)
         drag.update(pointer: resting, at: start)
         // A hand isn't steady
-        drag.update(pointer: resting + CGPoint(x: 5, y: 0), at: start + .milliseconds(900))
+        drag.update(pointer: resting + CGPoint(x: 5, y: 0), at: start + .milliseconds(400))
         #expect(drag.drop == .swap(third))
         drag.update(pointer: resting + CGPoint(x: 3, y: 2), at: start + WindowDrag.rearrangeDelay)
         #expect(drag.isRearranging)
         #expect(drag.drop == .beside(third, .left))
         // It rearranges until the release: the side follows the mouse
-        drag.update(pointer: point(in: third, 0.7, 0.5), at: start + .milliseconds(1100))
+        drag.update(pointer: point(in: third, 0.7, 0.5), at: start + WindowDrag.rearrangeDelay + .milliseconds(100))
         #expect(drag.drop == .beside(third, .right))
-        drag.update(pointer: point(in: third, 0.5, 0.7), at: start + .milliseconds(1200))
+        drag.update(pointer: point(in: third, 0.5, 0.7), at: start + WindowDrag.rearrangeDelay + .milliseconds(200))
         #expect(drag.drop == .beside(third, .down))
         // Near the edge of the screen: along the whole edge of the workspace
-        drag.update(pointer: point(in: third, 0.95, 0.5), at: start + .milliseconds(1300))
+        drag.update(pointer: point(in: third, 0.95, 0.5), at: start + WindowDrag.rearrangeDelay + .milliseconds(300))
         #expect(drag.drop == .edge(workspace, .right))
     }
 
@@ -160,6 +159,50 @@ struct WindowDragTest {
         startDragging(first)
         try await release(workspace)
         assertEquals(root.layoutDescription, .h_tiles([.window(2), .window(1)]))
+    }
+
+    /// The mouse may move between two polls: the window goes where the mouse is when the button is released
+    @Test func testReleaseBetweenTwoPollsDropsWhereTheMouseIs() async throws {
+        let workspace = shownWorkspace()
+        let root = workspace.rootTilingContainer
+        let first = TestWindow.new(id: 1, parent: root)
+        let second = TestWindow.new(id: 2, parent: root)
+        try await workspace.layoutWorkspace()
+
+        startDragging(first)
+        drag.update(pointer: point(in: second, 0.5, 0.5), at: start)
+        #expect(drag.drop == .swap(second))
+        drag.releasePointerForTest = point(in: first, 0.5, 0.5) // Back on its own tile
+        try await release(workspace)
+        assertEquals(root.layoutDescription, .h_tiles([.window(1), .window(2)]))
+
+        startDragging(first)
+        drag.update(pointer: point(in: first, 0.5, 0.5), at: start)
+        assertEquals(drag.drop, nil)
+        drag.releasePointerForTest = point(in: second, 0.5, 0.5)
+        try await release(workspace)
+        assertEquals(root.layoutDescription, .h_tiles([.window(2), .window(1)]))
+    }
+
+    /// A layout during the drag that changes the tiles (a window was closed) changes the preview
+    @Test func testPreviewFollowsALayoutDuringTheDrag() async throws {
+        let workspace = shownWorkspace()
+        let root = workspace.rootTilingContainer
+        let first = TestWindow.new(id: 1, parent: root)
+        let second = TestWindow.new(id: 2, parent: root)
+        let third = TestWindow.new(id: 3, parent: root)
+        try await workspace.layoutWorkspace()
+
+        startDragging(first)
+        let pointer = point(in: third, 0.5, 0.5)
+        drag.update(pointer: pointer, at: start)
+        assertEquals(drag.preview, [third.lastAppliedLayoutPhysicalRect.orDie(), first.lastAppliedLayoutPhysicalRect.orDie()])
+
+        second.closeAxWindow()
+        try await workspace.layoutWorkspace()
+        drag.update(pointer: pointer, at: start + .milliseconds(30))
+        #expect(drag.drop == .swap(third))
+        assertEquals(drag.preview, [rect(965, 10, 945, 1059), rect(10, 10, 945, 1059)])
     }
 
     // MARK: Rearrange
@@ -261,6 +304,47 @@ struct WindowDragTest {
         try await release(workspace)
         assertEquals(workspace.rootTilingContainer.layoutDescription, .h_tiles([.window(2), .window(1), .window(3)]))
         assertEquals(left, [second.lastAppliedLayoutPhysicalRect.orDie()])
+    }
+
+    /// A window that already lies along the whole edge stays where it is: neither its place nor its weight changes
+    @Test func testWindowAlongTheEdgeStaysThere() async throws {
+        let workspace = shownWorkspace()
+        let root = workspace.rootTilingContainer
+        let first = TestWindow.new(id: 1, parent: root, adaptiveWeight: 0.6)
+        TestWindow.new(id: 2, parent: root, adaptiveWeight: 1.4)
+        try await workspace.layoutWorkspace()
+        let tile = first.lastAppliedLayoutPhysicalRect
+
+        startDragging(first)
+        rearrange(at: CGPoint(x: 40, y: 500))
+        assertEquals(drag.drop, nil)
+        assertEquals(drag.preview, [])
+        try await release(workspace)
+        assertEquals(root.layoutDescription, .h_tiles([.window(1), .window(2)]))
+        assertEquals(first.getWeight(.h), 0.6)
+        assertEquals(first.lastAppliedLayoutPhysicalRect, tile)
+    }
+
+    /// The left or the top edge of a window that is resized moves the window too: that's no drag, and the tile next to it
+    /// follows the edge every step of the way (the window keeps its tile while it's resized)
+    @Test func testResizeOfTheLeftEdgeIsNoDrag() async throws {
+        let workspace = shownWorkspace()
+        let root = workspace.rootTilingContainer
+        let first = TestWindow.new(id: 1, parent: root)
+        let second = TestWindow.new(id: 2, parent: root)
+        try await workspace.layoutWorkspace()
+        assertEquals(second.lastAppliedLayoutPhysicalRect, rect(965, 10, 945, 1059))
+
+        windowIsMovedWithMouse(second, isResized: true)
+        assertEquals(drag.window, nil)
+        second.axRectForTest = rect(865, 10, 1045, 1059)
+        try await resizeWithMouse(second)
+        second.axRectForTest = rect(815, 10, 1095, 1059)
+        try await resizeWithMouse(second)
+        try await release(workspace)
+        let rounded = { (rect: Rect?) in rect.map { [$0.minX, $0.minY, $0.width, $0.height].map { ($0 * 100).rounded() / 100 } } }
+        assertEquals(rounded(first.lastAppliedLayoutPhysicalRect), [10, 10, 795, 1059])
+        assertEquals(rounded(second.lastAppliedLayoutPhysicalRect), [815, 10, 1095, 1059])
     }
 
     /// The left and the right side make a column of its own, the top and the bottom stack the window in the column
