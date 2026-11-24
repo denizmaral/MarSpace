@@ -32,13 +32,18 @@ func resizedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutabl
 /// The mouse button was released
 @MainActor
 func resetManipulatedWithMouseIfPossible() async throws {
-    if endManipulationWithMouse() {
+    guard currentlyManipulatedWithMouseWindowId != nil else { return }
+    if WindowDrag.shared.drop != nil, let token: RunSessionGuard = .isServerEnabled {
+        // A dragged window takes its new place in a session: laid out, flashed and persisted right away. The session
+        // ends the manipulation when it refreshes the model (see refreshModel_nonCancellable)
+        _ = try await runLightSession(.resetManipulatedWithMouse, token) { endManipulationWithMouse() }
+    } else if endManipulationWithMouse() {
         scheduleCancellableCompleteRefreshSession(.resetManipulatedWithMouse, optimisticallyPreLayoutWorkspaces: true)
     }
 }
 
 /// The window that was moved or resized with the mouse is laid out again, and the tiling trees are persisted again
-/// (see `WindowPlacementStore.persistIfChanged`)
+/// (see `WindowPlacementStore.persistIfChanged`). A dragged window takes its new place (see `WindowDrag`)
 ///
 /// - Returns: false if no window was manipulated with the mouse
 @MainActor
@@ -46,6 +51,7 @@ func resetManipulatedWithMouseIfPossible() async throws {
 func endManipulationWithMouse() -> Bool {
     guard currentlyManipulatedWithMouseWindowId != nil else { return false }
     currentlyManipulatedWithMouseWindowId = nil
+    WindowDrag.shared.finish()
     for workspace in Workspace.all {
         workspace.resetResizeWeightBeforeResizeRecursive()
     }
@@ -75,6 +81,8 @@ func resizeWithMouse(_ window: Window) async throws {
             return // Nothing to do for floating, or unconventional windows
         case .tilingContainer:
             guard let rect = try await window.getAxRect(.cancellable) else { return }
+            // A drag whose first step changed the size too little to tell is a resize after all (see moveTilingWindow)
+            if WindowDrag.shared.window === window && window.isResized(to: rect.size) { WindowDrag.shared.end() }
             guard let lastAppliedLayoutRect = window.lastAppliedLayoutPhysicalRect else { return }
             // Where the window was when the drag started (the layout leaves it alone while it's dragged). An edge that
             // is still there isn't dragged, also if it isn't at the edge of the tile: the window refuses the size of

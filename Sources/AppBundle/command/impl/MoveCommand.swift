@@ -148,7 +148,7 @@ private let moveOutMacosUnconventionalWindow = "moving macOS fullscreen, minimiz
     }
 }
 
-@MainActor private func createImplicitContainerAndMoveWindow(
+@MainActor func createImplicitContainerAndMoveWindow(
     _ window: Window,
     _ workspace: Workspace,
     _ direction: CardinalDirection,

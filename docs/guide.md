@@ -50,6 +50,21 @@ action) moves a window through the tree like i3 does. With the focus border (Set
 move put elsewhere flash for a moment in its colors. With focus-follows-mouse, the mouse pointer on the window goes along
 with it: the focus stays on the window that you moved.
 
+**Dragging a window** by its title bar changes the tiles too. Nothing changes while you drag: an outline in the colors of
+the focus border (also while the border is off) shows where the window goes when you let go of it.
+
+- A quick drag swaps the window with the window under the mouse. Both places are outlined, dashed, with ⇄.
+- Hold the mouse still for a second while you drag, and the drag changes the layout instead, until you let go. The space
+  that the window gets is filled. Over another window, the window goes next to it, on the side that the mouse is nearest
+  to, and takes half of its tile: the other windows keep theirs. Near an edge of the screen (its outer twelfth), the
+  window takes the whole edge of the workspace: a column at the left or the right, a row at the top or the bottom. On a
+  scrolling workspace, the left and the right side of a window make a column of its own, the top and the bottom stack
+  the window in the column.
+- Let go over the window's own place, or outside of the workspaces, and it goes back.
+
+macOS tiles windows itself when you drag them to an edge of the screen or onto the menu bar, or hold Option while
+dragging. Its preview may show along with MarSpace's: you can turn it off in System Settings › Desktop & Dock › Windows.
+
 Shortcuts can also do what Hyprland users know by other names (Settings › Shortcuts, the action menu):
 
 - **Cycle through the windows**: the next or the previous window of the workspace, and around at the end (`cyclenext`)

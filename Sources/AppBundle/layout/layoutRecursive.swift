@@ -6,7 +6,7 @@ extension Workspace {
     func layoutWorkspace() async throws { // todo revisit API
         if isEffectivelyEmpty { return }
         let rect = rootTilingRect
-        try await layoutRecursive(rect.topLeftCorner, width: rect.width, height: rect.height, virtual: tilingRectPaddedByOuterGaps, LayoutContext(self, isInCorner: false))
+        try await layoutRecursive(rect.topLeftCorner, width: rect.width, height: rect.height, virtual: tilingRectPaddedByOuterGaps, LayoutContext(self, sendsNothing: false))
     }
 
     /// The sizes of the tiles of the tiling windows, laid out as if the workspace was shown. While the workspace isn't
@@ -25,10 +25,33 @@ extension Workspace {
             width: rect.width,
             height: rect.height,
             virtual: tilingRectPaddedByOuterGaps,
-            LayoutContext(self, isInCorner: true),
+            LayoutContext(self, sendsNothing: true),
             &frames,
         )
         return Dictionary(frames.map { ($0.window, $0.size) }, uniquingKeysWith: { _, last in last })
+    }
+
+    /// The tiles of the tiling windows that are on the screen, as a layout gives them now: for a change of the tree that is
+    /// tried (see `tryOut`). Sends nothing, but records the rects like a layout
+    @MainActor
+    func tilesOnTheScreen() -> [Window: Rect] {
+        if isEffectivelyEmpty { return [:] }
+        let rect = rootTilingRect
+        var frames: [TiledWindowFrame] = []
+        _ = rootTilingContainer.layoutTiling(
+            rect.topLeftCorner,
+            width: rect.width,
+            height: rect.height,
+            virtual: tilingRectPaddedByOuterGaps,
+            LayoutContext(self, sendsNothing: true),
+            &frames,
+        )
+        return Dictionary(
+            frames.lazy.filter { !$0.isParked }.map { frame in
+                (frame.window, Rect(topLeftX: frame.topLeft.x, topLeftY: frame.topLeft.y, width: frame.size.width, height: frame.size.height))
+            },
+            uniquingKeysWith: { _, last in last },
+        )
     }
 
     /// The part of the monitor for the tiling windows: without the gaps at the screen edges. A single tiling window gets
@@ -133,7 +156,7 @@ extension TreeNode {
                 lastAppliedLayoutVirtualRect = virtual
                 if window.isFullscreen && window == context.workspace.rootTilingContainer.mostRecentWindowRecursive {
                     lastAppliedLayoutPhysicalRect = nil
-                    if context.isInCorner { // Only its size counts, the containers don't move it
+                    if context.sendsNothing { // Only its size counts, the containers don't move it
                         frames.append(TiledWindowFrame(window: window, topLeft: point, size: window.fullscreenRect(context).size))
                     } else {
                         window.layoutFullscreen(context)
@@ -223,18 +246,19 @@ private struct LayoutContext {
     let gaps: Gaps
     /// Of the monitor of the workspace
     let visibleRect: Rect
-    /// The workspace isn't shown, its windows are in a corner of the screen: the layout only gives them the sizes of
-    /// their tiles, and sends nothing (see ``Workspace/tileSizesWhileHidden()``)
-    let isInCorner: Bool
+    /// The layout only gives the windows their tiles, and sends nothing: the workspace isn't shown, its windows are in a
+    /// corner of the screen (see ``Workspace/tileSizesWhileHidden()``), or a drop of a dragged window is tried (see
+    /// ``Workspace/tilesOnTheScreen()``)
+    let sendsNothing: Bool
     /// The screen of a scrolling workspace (see ``Layout/scrolling``), nil for other workspaces
     let scrollingScreen: ScrollingScreen?
 
     @MainActor
-    init(_ workspace: Workspace, isInCorner: Bool) {
+    init(_ workspace: Workspace, sendsNothing: Bool) {
         self.workspace = workspace
         self.gaps = config.gaps
         self.visibleRect = workspace.workspaceMonitorInfo.visibleRect
-        self.isInCorner = isInCorner
+        self.sendsNothing = sendsNothing
         let root = workspace.rootTilingContainer
         // While MarSpace is disabled, every window is on the screen: the columns share it like tiles
         self.scrollingScreen = root.layout == .scrolling && TrayMenuModel.shared.isEnabled
@@ -521,7 +545,7 @@ extension TilingContainer {
         let placements = strip.placements(offset: scrollOffset, isStartEdgeFree: screen.isStartEdgeFree, isEndEdgeFree: screen.isEndEdgeFree)
         // The screen slides along the strip (see ScrollAnimation). Not where another monitor is behind an edge: the
         // windows that slide off the screen would be seen there
-        let previousPlacements = wasLaidOut && !context.isInCorner && config.animatesScrolling && abs(scrollOffset - previousOffset) >= 1 &&
+        let previousPlacements = wasLaidOut && !context.sendsNothing && config.animatesScrolling && abs(scrollOffset - previousOffset) >= 1 &&
             screen.isStartEdgeFree && screen.isEndEdgeFree
             ? strip.placements(offset: previousOffset, isStartEdgeFree: true, isEndEdgeFree: true)
             : nil

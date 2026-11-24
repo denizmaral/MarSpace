@@ -151,6 +151,51 @@ open class TreeNode: Equatable, AeroAny {
     func cleanUserData<T>(key: TreeNodeUserDataKey<T>) -> T? { userData.removeValue(forKey: key.key) as! T? }
 }
 
+// MARK: A change of the tree that is tried and taken back (see `tryOut`)
+
+extension TreeNode {
+    /// What a change of the tree can change of the node: where it's bound, its weight, its children and the order of the
+    /// most recent ones, and the rects that a layout recorded
+    struct TreeState {
+        fileprivate let children: [TreeNode]
+        fileprivate let parent: NonLeafTreeNodeObject?
+        fileprivate let adaptiveWeight: CGFloat
+        fileprivate let mostRecentChildren: [TreeNode]
+        fileprivate let bindingGeneration: UInt64
+        fileprivate let unboundStacktrace: String?
+        fileprivate let lastAppliedLayoutPhysicalRect: Rect?
+        fileprivate let lastAppliedLayoutVirtualRect: Rect?
+    }
+
+    @MainActor
+    var treeState: TreeState {
+        TreeState(
+            children: _children,
+            parent: _parent,
+            adaptiveWeight: adaptiveWeight,
+            mostRecentChildren: Array(_mruChildren),
+            bindingGeneration: bindingGeneration,
+            unboundStacktrace: unboundStacktrace,
+            lastAppliedLayoutPhysicalRect: lastAppliedLayoutPhysicalRect,
+            lastAppliedLayoutVirtualRect: lastAppliedLayoutVirtualRect,
+        )
+    }
+
+    /// Exactly as it was: not by binding (which counts the binding generation and makes the node the most recent child)
+    @MainActor
+    func restore(_ state: TreeState) {
+        _children = state.children
+        _parent = state.parent
+        adaptiveWeight = state.adaptiveWeight
+        for child in Array(_mruChildren) { _mruChildren.remove(child) }
+        for child in state.mostRecentChildren.reversed() { _mruChildren.pushOrRaise(child) }
+        bindingGeneration = state.bindingGeneration
+        unboundStacktrace = state.unboundStacktrace
+        lastAppliedLayoutPhysicalRect = state.lastAppliedLayoutPhysicalRect
+        lastAppliedLayoutVirtualRect = state.lastAppliedLayoutVirtualRect
+    }
+}
+
 // periphery:ignore - Generic T is used
 struct TreeNodeUserDataKey<T> {
     let key: String
