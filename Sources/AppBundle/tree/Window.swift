@@ -328,3 +328,32 @@ extension Window {
 
     func asMacWindow() -> MacWindow { self as! MacWindow }
 }
+
+extension Window {
+    /// What a change of the tree and a layout can change of the window besides its node (see `tryOut`)
+    struct PlaceState {
+        fileprivate let isFullscreen: Bool
+        fileprivate let isParkedOffTheScreen: Bool
+        fileprivate let isPinned: Bool
+        fileprivate let dwindleSplitAnchor: TreeNode?
+        fileprivate let tilingSlot: TilingSlot?
+    }
+
+    var placeState: PlaceState {
+        PlaceState(
+            isFullscreen: isFullscreen,
+            isParkedOffTheScreen: isParkedOffTheScreen,
+            isPinned: isPinned,
+            dwindleSplitAnchor: dwindleSplitAnchor,
+            tilingSlot: tilingSlot,
+        )
+    }
+
+    func restore(_ state: PlaceState) {
+        isFullscreen = state.isFullscreen
+        isParkedOffTheScreen = state.isParkedOffTheScreen
+        isPinned = state.isPinned
+        dwindleSplitAnchor = state.dwindleSplitAnchor
+        tilingSlot = state.tilingSlot
+    }
+}

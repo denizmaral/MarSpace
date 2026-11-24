@@ -35,7 +35,7 @@ func movedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutableR
 }
 
 @MainActor
-private func moveWithMouse(_ window: Window) async throws { // todo cover with tests
+private func moveWithMouse(_ window: Window) async throws {
     resetClosedWindowsCache()
     switch window.windowParentCases {
         case .floatingWindowsContainer:
@@ -43,7 +43,7 @@ private func moveWithMouse(_ window: Window) async throws { // todo cover with t
         case .macosFullscreenWindowsContainer, .macosMinimizedWindowsContainer, .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
             return // Unconventional windows can't be moved with mouse
         case .tilingContainer:
-            moveTilingWindow(window)
+            try await moveTilingWindow(window)
         case nil: return
     }
 }
@@ -57,33 +57,119 @@ private func moveFloatingWindow(_ window: Window) async throws {
     }
 }
 
+/// The tiling window is dragged: it takes its new place when the mouse button is released (see ``WindowDrag``). The layout
+/// leaves it alone meanwhile
 @MainActor
-private func moveTilingWindow(_ window: Window) {
+private func moveTilingWindow(_ window: Window) async throws {
+    // The left or the top edge of a window that is resized moves the window too: that's no drag (see resizeWithMouse)
+    var isResized = false
+    if WindowDrag.shared.window !== window, let size = try await window.getAxSize(.cancellable) {
+        isResized = window.isResized(to: size)
+    }
+    // The last session of a drag may run after the mouse button was released: the drag doesn't start again (see
+    // refreshModel_nonCancellable)
+    guard isLeftMouseButtonDown else { return }
     currentlyManipulatedWithMouseWindowId = window.windowId
     window.lastAppliedLayoutPhysicalRect = nil
-    let mouseLocation = mouseLocation
-    let targetWorkspace = mouseLocation.monitorApproximation.visibleWorkspace
-    let swapTarget = mouseLocation
-        .findWindowRecursively(in: targetWorkspace.rootTilingContainer, virtual: false, fullscreenCoversAll: false)?
-        .takeIf { $0 != window }
-    if targetWorkspace != window.nodeWorkspace { // Move window to a different monitor
-        let parent: TilingContainer
-        let index: Int
-        if let swapTarget,
-           let (_parent, _index) = swapTarget.nearestAliveTilingParent(),
-           let targetRect = swapTarget.lastAppliedLayoutPhysicalRect
-        {
-            parent = _parent
-            index = mouseLocation.getProjection(_parent.orientation) >= targetRect.center.getProjection(_parent.orientation)
-                ? _index + 1
-                : _index
-        } else {
-            parent = targetWorkspace.rootTilingContainer
-            index = 0
+    if !isResized { WindowDrag.shared.begin(window) }
+}
+
+/// A tiling window that the user drags with the mouse. Nothing changes during the drag: the window takes its new place
+/// when the mouse button is released (``WindowDrop``, see `endManipulationWithMouse`), and ``DropPreview`` shows the place
+/// meanwhile.
+///
+/// A quick drag swaps the window with the window under the mouse. Once the mouse was held still for a second
+/// (``rearrangeDelay``), the drag rearranges the layout until the button is released: the window goes next to the window
+/// under the mouse, or along the whole edge of the workspace near an edge of the screen. No accessibility notification
+/// comes while the mouse is still: the mouse is polled during the drag
+@MainActor
+final class WindowDrag {
+    static let shared = WindowDrag()
+
+    static let rearrangeDelay: Duration = .seconds(1)
+    /// How far the mouse may move while it's held still: a hand isn't steady
+    static let stillDistance: CGFloat = 8
+    private static let pollInterval: Duration = .milliseconds(30)
+
+    /// The dragged window
+    private(set) var window: Window? = nil
+    /// What the release does
+    private(set) var drop: WindowDrop? = nil
+    /// The places that the preview shows: of the dragged window, and of the window that it swaps with
+    private(set) var preview: [Rect] = []
+    private(set) var isRearranging = false
+    /// Where the mouse came to rest, and when
+    private var still: (point: CGPoint, since: ContinuousClock.Instant)? = nil
+    /// Counts the drags: the poll of a drag that is over stops
+    private var generation: UInt = 0
+    private var poll: Task<(), any Error>? = nil
+
+    private init() {}
+
+    /// The window is dragged. Nothing happens if it's already dragged
+    func begin(_ window: Window) {
+        guard self.window !== window else { return }
+        end()
+        self.window = window
+        if isUnitTest { return } // The tests move the mouse with update(pointer:at:)
+        let generation = generation
+        poll = Task.startUnstructured { @MainActor in
+            while self.generation == generation { // The singleton
+                guard isLeftMouseButtonDown else {
+                    // The release wasn't seen (the global monitor doesn't see it over MarSpace's own windows)
+                    try await resetManipulatedWithMouseIfPossible()
+                    return
+                }
+                self.update(pointer: mouseLocation, at: .now)
+                try await Task.sleep(for: Self.pollInterval)
+            }
         }
-        window.bind(to: parent, adaptiveWeight: WEIGHT_AUTO, index: index)
-    } else if let swapTarget {
-        swapWindows(mruDominant: window, swapTarget)
+    }
+
+    /// Where the mouse is now: the preview shows the drop there
+    func update(pointer: CGPoint, at now: ContinuousClock.Instant) {
+        guard let window else { return }
+        if let still, (pointer - still.point).vectorLength <= Self.stillDistance {
+            if now - still.since >= Self.rearrangeDelay { isRearranging = true } // Until the button is released
+        } else {
+            still = (pointer, now)
+        }
+        let drop = WindowDrop.at(pointer, dragging: window, isRearranging: isRearranging)
+        guard drop != self.drop else { return }
+        self.drop = drop
+        preview = drop?.tiles(of: window) ?? []
+        DropPreview.shared.show(preview, isSwap: drop?.isSwap == true, below: window)
+    }
+
+    /// The mouse button was released: the window takes the place that the preview showed, if any
+    func finish() {
+        guard let window else { return }
+        let drop = drop
+        end()
+        guard let drop, drop.canApply(to: window) else { return }
+        drop.apply(to: window)
+        MoveFlash.shared.flashAfterLayout(drop.movedWindows(window))
+    }
+
+    /// The drag is over, or it's a resize after all
+    func end() {
+        generation &+= 1
+        poll = nil // It stops by itself, also if it's running the session after a release that it saw
+        window = nil
+        drop = nil
+        preview = []
+        isRearranging = false
+        still = nil
+        DropPreview.shared.hide()
+    }
+}
+
+extension Window {
+    /// The window has another size than the one it had after the last layout: it's resized, not moved
+    @MainActor
+    func isResized(to size: CGSize) -> Bool {
+        guard let before = observedFrame?.size else { return false }
+        return abs(size.width - before.width) >= 1 || abs(size.height - before.height) >= 1
     }
 }
 

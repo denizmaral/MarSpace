@@ -66,7 +66,7 @@ final class FocusBorderController {
             of: nativeWindowId,
             pid: window.macApp.pid,
             panel: panel.isVisible ? CGWindowID(exactly: panel.windowNumber) : nil,
-            flashPanels: MoveFlash.shared.shownPanelNumbers,
+            flashPanels: MoveFlash.shared.shownPanelNumbers.union(DropPreview.shared.shownPanelNumbers),
             windowFrame: CGRect(x: windowFrame.topLeftX, y: windowFrame.topLeftY, width: windowFrame.width, height: windowFrame.height),
             // A window beyond the edge of the monitor: the border follows the edge, over the window
             isBorderOverTheWindow: windowRect != windowFrame,
@@ -397,14 +397,6 @@ private final class FocusBorderPanel: NSPanel {
         strokeMask.lineWidth = lineWidth
         strokeMask.path = unsafe CGPath(roundedRect: strokeRect, cornerWidth: radius, cornerHeight: radius, transform: nil)
 
-        switch border.color {
-            case .solid(let color):
-                gradientLayer.colors = [color.argbCgColor, color.argbCgColor]
-            case .gradient(let start, let end, let fromTopLeft):
-                gradientLayer.colors = [start.argbCgColor, end.argbCgColor]
-                // Layer coordinates: the origin is at the bottom left corner
-                gradientLayer.startPoint = fromTopLeft ? CGPoint(x: 0, y: 1) : CGPoint(x: 1, y: 1)
-                gradientLayer.endPoint = fromTopLeft ? CGPoint(x: 1, y: 0) : CGPoint(x: 0, y: 0)
-        }
+        border.color.paint(gradientLayer)
     }
 }

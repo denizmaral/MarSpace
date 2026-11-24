@@ -45,6 +45,29 @@ final class TilingContainer: TreeNode, NonLeafTreeNodeObject { // todo consider 
 }
 
 extension TilingContainer {
+    /// What a change of the tree and a layout can change of the container besides its node (see `tryOut`)
+    struct ShapeState {
+        fileprivate let orientation: Orientation
+        fileprivate let layout: Layout
+        fileprivate let lifeStatus: TilingContainerLifeStatus
+        fileprivate let lastLayoutLength: CGFloat?
+        fileprivate let scrollOffset: CGFloat
+    }
+
+    var shapeState: ShapeState {
+        ShapeState(orientation: _orientation, layout: _layout, lifeStatus: lifeStatus, lastLayoutLength: lastLayoutLength, scrollOffset: scrollOffset)
+    }
+
+    func restore(_ state: ShapeState) {
+        _orientation = state.orientation
+        _layout = state.layout // Not by the setter: the container may be dead now, and alive again
+        lifeStatus = state.lifeStatus
+        lastLayoutLength = state.lastLayoutLength
+        scrollOffset = state.scrollOffset
+    }
+}
+
+extension TilingContainer {
     var isRootContainer: Bool { parent is Workspace }
 
     @MainActor
