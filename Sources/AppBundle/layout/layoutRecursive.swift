@@ -67,7 +67,8 @@ extension TreeNode {
                 _ = workspace.rootTilingContainer.layoutTiling(point, width: width, height: height, virtual: virtual, context, &frames)
                 var slides: [ScrollAnimation.Slide] = []
                 for frame in frames {
-                    let tile = frame.shift == .zero ? frame.topLeft : frame.topLeft + frame.shift
+                    let offset = frame.shift + frame.centering
+                    let tile = offset == .zero ? frame.topLeft : frame.topLeft + offset
                     let topLeft = if frame.isParked, let screen = context.scrollingScreen {
                         frame.window.topLeftHidden(in: screen.hideCorner, width: frame.window.size(inTile: frame.size).width, of: screen.visibleRect)
                     } else {
@@ -112,7 +113,9 @@ extension TreeNode {
     ///
     /// - Returns: how far the windows of the node reach beyond the end of its tile (right, bottom), as far as it's known
     ///   (see ``Window/size(inTile:)``). Exactly 0 where they fill it, negative where all of them leave a part of it
-    ///   free, positive where a window refuses to be as small as its tile
+    ///   free, positive where a window refuses to be as small as its tile. As if every window was at the start of its
+    ///   tile: a window that rounds the size of its tile is centered on it only where no container moves it (see
+    ///   ``TiledWindowFrame/centering``)
     @MainActor
     fileprivate func layoutTiling(
         _ point: CGPoint,
@@ -140,8 +143,9 @@ extension TreeNode {
                 lastAppliedLayoutPhysicalRect = physicalRect
                 window.isFullscreen = false
                 let tile = CGSize(width: width, height: height)
-                frames.append(TiledWindowFrame(window: window, topLeft: point, size: tile))
                 let size = window.size(inTile: tile)
+                let centering = context.centering(of: size, onTile: physicalRect)
+                frames.append(TiledWindowFrame(window: window, topLeft: point, size: tile, centering: centering))
                 return CGSize(width: size.width - tile.width, height: size.height - tile.height)
             case .tilingContainer(let container):
                 lastAppliedLayoutPhysicalRect = physicalRect
@@ -162,6 +166,9 @@ private struct TiledWindowFrame {
     let window: Window
     let topLeft: CGPoint
     let size: CGSize
+    /// A window that rounds the size of its tile is centered on it (see ``Window/centering(of:inTile:)``), except along
+    /// the orientation of a container that moves its windows off each other: the shifts are from the starts of the tiles
+    var centering: CGPoint = .zero
     var shift: CGPoint = .zero
     /// The window is in a column of a scrolling workspace that is off the screen: it waits in a corner of the screen with
     /// the size of its tile (see ``Layout/scrolling``)
@@ -178,6 +185,13 @@ private struct ChildSpan {
     let excess: CGFloat
     /// Its windows in the frames of the layout
     let frames: Range<Int>
+}
+
+extension CGPoint {
+    /// Only the part across `orientation`
+    fileprivate func withoutOffset(along orientation: Orientation) -> CGPoint {
+        orientation == .h ? CGPoint(x: 0, y: y) : CGPoint(x: x, y: 0)
+    }
 }
 
 extension CGSize {
@@ -207,6 +221,8 @@ extension TilingContainer {
 private struct LayoutContext {
     let workspace: Workspace
     let gaps: Gaps
+    /// Of the monitor of the workspace
+    let visibleRect: Rect
     /// The workspace isn't shown, its windows are in a corner of the screen: the layout only gives them the sizes of
     /// their tiles, and sends nothing (see ``Workspace/tileSizesWhileHidden()``)
     let isInCorner: Bool
@@ -217,12 +233,25 @@ private struct LayoutContext {
     init(_ workspace: Workspace, isInCorner: Bool) {
         self.workspace = workspace
         self.gaps = config.gaps
+        self.visibleRect = workspace.workspaceMonitorInfo.visibleRect
         self.isInCorner = isInCorner
         let root = workspace.rootTilingContainer
         // While MarSpace is disabled, every window is on the screen: the columns share it like tiles
         self.scrollingScreen = root.layout == .scrolling && TrayMenuModel.shared.isEnabled
             ? ScrollingScreen(workspace.workspaceMonitorInfo, root.orientation)
             : nil
+    }
+
+    /// See ``Window/centering(of:inTile:)``. Not out of the screen where the tile is at its edge (the outer gaps are
+    /// smaller than half of the difference): macOS keeps windows below the menu bar, and a part of the window would
+    /// show on the monitor next to it
+    @MainActor
+    func centering(of size: CGSize, onTile tile: Rect) -> CGPoint {
+        let centering = Window.centering(of: size, inTile: tile.size)
+        return CGPoint(
+            x: max(centering.x, min(0, visibleRect.topLeftX - tile.topLeftX)),
+            y: max(centering.y, min(0, visibleRect.topLeftY - tile.topLeftY)),
+        )
     }
 }
 
@@ -307,7 +336,11 @@ extension TilingContainer {
     /// depend on what the windows make of them, but a window can refuse the size of its tile: App Store is at least 1000
     /// wide and covers a part of the next tile, System Settings is at most 740 wide and leaves a part of its tile free.
     /// If the children fit into the container as they are, they are moved off each other (see
-    /// ``packingShifts(_:gap:)``). No window is asked for another size than the one of its tile
+    /// ``packingShifts(_:gap:)``). No window is asked for another size than the one of its tile.
+    ///
+    /// A window that only rounds the size of its tile (Terminal takes whole lines and characters) is centered on it (see
+    /// ``Window/centering(of:inTile:)``), except along the orientation of a container whose children are moved off
+    /// each other: they are next to each other then, at the gap
     @MainActor
     fileprivate func layoutTiles(
         _ point: CGPoint,
@@ -367,8 +400,11 @@ extension TilingContainer {
         var distanceToEnd: CGFloat = 0 // From the end of the tile of the child to the end of the container
         for (i, span) in spans.enumerated().reversed() {
             let shift = shifts?[i] ?? 0
-            if shift != 0 {
-                for frame in span.frames { frames[frame].shift = frames[frame].shift.addingOffset(orientation, shift) }
+            if shifts != nil {
+                for frame in span.frames {
+                    frames[frame].shift = frames[frame].shift.addingOffset(orientation, shift)
+                    frames[frame].centering = frames[frame].centering.withoutOffset(along: orientation)
+                }
             }
             excessAlong = max(excessAlong, shift + span.excess - distanceToEnd)
             distanceToEnd += span.tileLength + rawGap

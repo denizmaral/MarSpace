@@ -9,6 +9,8 @@ final class TestWindow: Window, CustomStringConvertible {
     var minimumSizeForTest: CGSize? = nil
     /// The app refuses a bigger size, e.g. System Settings is at most 740 wide
     var maximumSizeForTest: CGSize? = nil
+    /// Terminal takes whole lines and characters: the size is rounded to whole cells of this size
+    var characterGridForTest: CGSize? = nil
     /// The frames read back after sends, delivered by ``deliverReadBacksForTest()``. nil: delivered right away
     var heldReadBacksForTest: [(frame: Rect, generation: UInt)]? = nil
     /// When the frames are read back. nil: now
@@ -50,6 +52,12 @@ final class TestWindow: Window, CustomStringConvertible {
         }
         if let maximum = maximumSizeForTest {
             applied = CGSize(width: min(applied.width, maximum.width), height: min(applied.height, maximum.height))
+        }
+        if let cell = characterGridForTest {
+            applied = CGSize(
+                width: (applied.width / cell.width).rounded() * cell.width,
+                height: (applied.height / cell.height).rounded() * cell.height,
+            )
         }
         let frame = Rect(topLeftX: origin.x, topLeftY: origin.y, width: applied.width, height: applied.height)
         axRectForTest = frame

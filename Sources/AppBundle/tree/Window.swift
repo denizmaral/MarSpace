@@ -178,6 +178,26 @@ open class Window: TreeNode, Hashable {
         )
     }
 
+    /// Where the window goes on its tile, from the top left corner of the tile. A window that is at most a gap bigger or
+    /// smaller than its tile only rounds the size of the tile (Terminal takes whole lines and characters): it's centered
+    /// on its tile, so that it reaches as far beyond the tile, or leaves as much of it free, on both sides. A window that
+    /// is further off (a minimum or a maximum size of the app) stays at the start of its tile, where windows are moved
+    /// off each other (see `TilingContainer.layoutTiles`)
+    ///
+    /// - Parameter size: what the window makes of the tile, see ``size(inTile:)``
+    @MainActor
+    static func centering(of size: CGSize, inTile tile: CGSize) -> CGPoint {
+        let gaps = config.gaps.inner
+        func centering(_ length: CGFloat, _ tileLength: CGFloat, gap: Int) -> CGFloat {
+            let difference = length - tileLength
+            return difference != 0 && abs(difference) <= CGFloat(gap) ? -difference / 2 : 0
+        }
+        return CGPoint(
+            x: centering(size.width, tile.width, gap: gaps.horizontal),
+            y: centering(size.height, tile.height, gap: gaps.vertical),
+        )
+    }
+
     /// The window reaches beyond the gap after its tile, as far as it's known: it covers a part of the tile next to it.
     /// Windows are moved off each other only then (see `TilingContainer.layoutTiles`). A window that reaches only into
     /// the gap covers nothing (Terminal snaps to its character grid)
@@ -211,22 +231,33 @@ open class Window: TreeNode, Hashable {
     private static let layoutRequestsAfterReadBackQuietInterval: Duration = .seconds(1)
 
     /// The layout that sent the frame didn't know the answer yet, or the window changed its mind: the windows are laid
-    /// out again if that can move one of them. Windows are moved only around a window that is bigger than its tile, so
-    /// a window that is only smaller than its tile, or reaches only into the gap after it (Terminal snaps to its
-    /// character grid), doesn't cost a refresh session
+    /// out again if that can move one of them. A window that only rounds the size of its tile moves itself, it's
+    /// centered on its tile (see ``centering(of:inTile:)``). Windows are moved off each other only around a window that
+    /// is bigger than its tile. So a window that is smaller than its tile by more than a gap doesn't cost a refresh
+    /// session.
+    ///
+    /// Only a changed answer to a size counts towards ``maxLayoutRequestsAfterReadBack``: the layout that the first
+    /// answer to a size asks for asks the same size again, and knows the answer. The tiles change many times a second
+    /// while a key repeats a resize or a border is dragged, and the last answer counts
     @MainActor
     private func rememberSizeAnswer(asked: CGSize, got: CGSize, at now: ContinuousClock.Instant) {
+        let isFirstAnswer = sizeAnswers.latest?.asked != asked && sizeAnswers.previous?.asked != asked
         let assumed = size(inTile: asked)
         let wasBiggerThanTile = isBiggerThanTile
         remember(SizeAnswer(asked: asked, got: got))
-        guard lastAppliedLayoutPhysicalRect?.size == asked, size(inTile: asked) != assumed else { return }
-        guard wasBiggerThanTile || nodeWorkspace?.rootTilingContainer.allLeafWindowsRecursive
+        let answered = size(inTile: asked)
+        guard lastAppliedLayoutPhysicalRect?.size == asked, answered != assumed else { return }
+        guard Self.centering(of: answered, inTile: asked) != Self.centering(of: assumed, inTile: asked) ||
+            wasBiggerThanTile ||
+            nodeWorkspace?.rootTilingContainer.allLeafWindowsRecursive
             .contains(where: { $0.lifeStatus.isInhabited && $0.isBiggerThanTile }) == true
         else { return }
-        let inARow = layoutRequestsAfterReadBack
-            .flatMap { now - $0.last < Self.layoutRequestsAfterReadBackQuietInterval ? $0.count : nil } ?? 0
-        guard inARow < Self.maxLayoutRequestsAfterReadBack else { return }
-        layoutRequestsAfterReadBack = (inARow + 1, now)
+        if !isFirstAnswer {
+            let inARow = layoutRequestsAfterReadBack
+                .flatMap { now - $0.last < Self.layoutRequestsAfterReadBackQuietInterval ? $0.count : nil } ?? 0
+            guard inARow < Self.maxLayoutRequestsAfterReadBack else { return }
+            layoutRequestsAfterReadBack = (inARow + 1, now)
+        }
         scheduleCancellableCompleteRefreshSession(.frameReadBack)
     }
 
