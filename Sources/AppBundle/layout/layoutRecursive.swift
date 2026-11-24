@@ -156,8 +156,9 @@ extension TreeNode {
                 lastAppliedLayoutVirtualRect = virtual
                 if window.isFullscreen && window == context.workspace.rootTilingContainer.mostRecentWindowRecursive {
                     lastAppliedLayoutPhysicalRect = nil
-                    if context.sendsNothing { // Only its size counts, the containers don't move it
-                        frames.append(TiledWindowFrame(window: window, topLeft: point, size: window.fullscreenRect(context).size))
+                    if context.sendsNothing { // The containers don't move it
+                        let rect = window.fullscreenRect(context)
+                        frames.append(TiledWindowFrame(window: window, topLeft: rect.topLeftCorner, size: rect.size))
                     } else {
                         window.layoutFullscreen(context)
                     }
