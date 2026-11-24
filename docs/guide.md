@@ -63,7 +63,9 @@ Shortcuts can also do what Hyprland users know by other names (Settings › Shor
 - **Tiles**: the windows share the space of the container side by side (horizontal) or on top of each other (vertical).
   Some apps refuse the size of their tile: App Store is at least 1000 wide and covers a part of the tile next to it,
   System Settings is at most 740 wide and leaves a part of its tile free. If the windows fit next to each other as they
-  are, they are moved off each other. If they don't fit, they overlap
+  are, they are moved off each other. If they don't fit, they overlap. Terminal takes only whole lines and characters,
+  so its windows are a few points bigger or smaller than their tiles: they are centered on their tiles, with the
+  difference split between both sides
 - **Accordion**: the windows are stacked, and a small padding on the sides shows that there are more. Focus left and
   right (or up and down) goes through them
 
