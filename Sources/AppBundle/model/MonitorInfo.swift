@@ -1,5 +1,6 @@
 import AppKit
 import Common
+import Synchronization
 
 private struct MonitorInfoImpl {
     let monitorAppKitNsScreenScreensId: Int
@@ -85,14 +86,18 @@ extension NSScreen {
     fileprivate var visibleRect: Rect { visibleFrame.withYAxisFlipped }
 }
 
-private let testMonitorInfoRect = Rect(topLeftX: 0, topLeftY: 0, width: 1920, height: 1080)
-private let testMonitorInfo = MonitorInfoImpl(
-    monitorAppKitNsScreenScreensId: 1,
-    name: "Test Monitor",
-    rect: testMonitorInfoRect,
-    visibleRect: testMonitorInfoRect,
-    isMain: true,
-)
+/// The monitor of the unit tests, at (0, 0): 1920x1080, unless a test changed its size (see `setTestMonitorSize(_:)`)
+private let testMonitorInfoRect = Mutex(Rect(topLeftX: 0, topLeftY: 0, width: 1920, height: 1080))
+private var testMonitorInfo: MonitorInfoImpl {
+    let rect = testMonitorInfoRect.withLock { $0 }
+    return MonitorInfoImpl(monitorAppKitNsScreenScreensId: 1, name: "Test Monitor", rect: rect, visibleRect: rect, isMain: true)
+}
+
+/// The screen of the unit tests changes its size: e.g. the external display took the place of the built-in one. The
+/// monitors follow when a session refreshes them (`gcMonitors`)
+func setTestMonitorSize(_ size: CGSize) {
+    testMonitorInfoRect.withLock { $0 = Rect(topLeftX: 0, topLeftY: 0, width: size.width, height: size.height) }
+}
 
 var mainMonitorInfo: MonitorInfo {
     if isUnitTest { return testMonitorInfo }

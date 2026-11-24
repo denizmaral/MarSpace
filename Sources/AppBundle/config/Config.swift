@@ -34,6 +34,9 @@ struct Config: Withable {
     var enableNormalizationOppositeOrientationForNestedContainers: Bool = true
     var persistentWorkspaces: OrderedSet<String> = []
     var focusFollowsMouse: Bool = false
+    /// The mouse rests this long while a window is dragged: the drag rearranges the layout instead of swapping (see
+    /// ``WindowDrag``)
+    var dragRearrangeDelay: Duration = .milliseconds(750)
     var focusBorder: FocusBorder = FocusBorder()
 
     var onFocusChanged: Shell<any Command> = .empty

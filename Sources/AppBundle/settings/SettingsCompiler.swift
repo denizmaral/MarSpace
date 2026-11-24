@@ -44,6 +44,7 @@ extension Settings {
         config.enableNormalizationOppositeOrientationForNestedContainers = general.oppositeOrientationForNestedContainers
         config.accordionPadding = general.accordionPadding
         config.automaticallyUnhideMacosHiddenApps = general.automaticallyUnhideMacosHiddenApps
+        config.dragRearrangeDelay = .milliseconds(min(max(general.dragRearrangeDelay, 250), 2000))
 
         let gaps = appearance.gaps
         config.gaps = Gaps(
