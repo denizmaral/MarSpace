@@ -55,6 +55,16 @@ extension WindowDrop {
         if case .swap = self { true } else { false }
     }
 
+    /// Ids and names only: no window titles in the log
+    var logDescription: String {
+        switch self {
+            case .swap(let target): "swap with \(target.windowId.description)"
+            case .beside(let target, let side): "beside \(target.windowId.description) \(side.rawValue)"
+            case .edge(let workspace, let side): "along the \(side.rawValue) edge of \(workspace.name)"
+            case .into(let workspace): "into \(workspace.name)"
+        }
+    }
+
     /// The workspace that the dragged window goes to
     @MainActor
     var workspace: Workspace? {

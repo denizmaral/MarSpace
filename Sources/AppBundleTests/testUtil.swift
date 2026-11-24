@@ -46,6 +46,9 @@ struct SerializedGloballyTrait: SuiteTrait, TestTrait, TestScoping {
 @MainActor
 func setUpWorkspacesForTests() {
     config = Config()
+    // A test may have changed the size of the screen
+    setTestMonitorSize(CGSize(width: 1920, height: 1080))
+    gcMonitors()
     config.enableNormalizationFlattenContainers = false // Make layout tests more predictable
     config.enableNormalizationOppositeOrientationForNestedContainers = false // Make layout tests more predictable
     config.defaultRootContainerOrientation = .horizontal // Make default layout predictable

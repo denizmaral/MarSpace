@@ -3,7 +3,7 @@ import Common
 import CoreGraphics
 import Testing
 
-// The test monitor is 1920x1080, see testMonitorInfoRect
+// The test monitor is 1920x1080, see testMonitorInfo
 @MainActor
 @Suite(.serializedGlobally)
 struct DwindleTest {

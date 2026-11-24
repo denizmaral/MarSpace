@@ -5,8 +5,9 @@ import Testing
 
 /// A tiling window that is dragged with the mouse takes its new place when the button is released, and a preview shows
 /// the place meanwhile (see WindowDrag). A quick drag swaps it with the window under the mouse, a drag that held the mouse
-/// still for ¾ of a second rearranges the layout. The preview is the tile that the window gets: the drop is tried on the trees
-/// and taken back, nobody sees it. The test monitor is 1920x1080, with the owner's settings: both normalizations, 10 pt gaps
+/// still for a moment (¾ of a second by default, Settings › General) rearranges the layout. The preview is the tile that
+/// the window gets: the drop is tried on the trees and taken back, nobody sees it. The test monitor is 1920x1080, with
+/// the owner's settings: both normalizations, 10 pt gaps
 @MainActor
 @Suite(.serializedGlobally)
 struct WindowDragTest {
@@ -40,7 +41,7 @@ struct WindowDragTest {
     /// The mouse is held still at `point` long enough: the drag rearranges
     private func rearrange(at point: CGPoint) {
         drag.update(pointer: point, at: start)
-        drag.update(pointer: point, at: start + WindowDrag.rearrangeDelay)
+        drag.update(pointer: point, at: start + config.dragRearrangeDelay)
         #expect(drag.isRearranging)
     }
 
@@ -113,17 +114,56 @@ struct WindowDragTest {
         // A hand isn't steady
         drag.update(pointer: resting + CGPoint(x: 5, y: 0), at: start + .milliseconds(400))
         #expect(drag.drop == .swap(third))
-        drag.update(pointer: resting + CGPoint(x: 3, y: 2), at: start + WindowDrag.rearrangeDelay)
+        drag.update(pointer: resting + CGPoint(x: 3, y: 2), at: start + config.dragRearrangeDelay)
         #expect(drag.isRearranging)
         #expect(drag.drop == .beside(third, .left))
         // It rearranges until the release: the side follows the mouse
-        drag.update(pointer: point(in: third, 0.7, 0.5), at: start + WindowDrag.rearrangeDelay + .milliseconds(100))
+        drag.update(pointer: point(in: third, 0.7, 0.5), at: start + config.dragRearrangeDelay + .milliseconds(100))
         #expect(drag.drop == .beside(third, .right))
-        drag.update(pointer: point(in: third, 0.5, 0.7), at: start + WindowDrag.rearrangeDelay + .milliseconds(200))
+        drag.update(pointer: point(in: third, 0.5, 0.7), at: start + config.dragRearrangeDelay + .milliseconds(200))
         #expect(drag.drop == .beside(third, .down))
         // Near the edge of the screen: along the whole edge of the workspace
-        drag.update(pointer: point(in: third, 0.95, 0.5), at: start + WindowDrag.rearrangeDelay + .milliseconds(300))
+        drag.update(pointer: point(in: third, 0.95, 0.5), at: start + config.dragRearrangeDelay + .milliseconds(300))
         #expect(drag.drop == .edge(workspace, .right))
+    }
+
+    /// The settings choose how long the mouse rests before the drag rearranges
+    @Test func testHowLongTheMouseRestsIsASetting() async throws {
+        var settings = Settings()
+        assertEquals(settings.compile().config.dragRearrangeDelay, .milliseconds(750))
+        settings.general.dragRearrangeDelay = 400
+        config = settings.compile().config
+        assertEquals(config.dragRearrangeDelay, .milliseconds(400))
+        settings.general.dragRearrangeDelay = 10 // Too short to tell from a quick drag
+        assertEquals(settings.compile().config.dragRearrangeDelay, .milliseconds(250))
+
+        let workspace = shownWorkspace()
+        let root = workspace.rootTilingContainer
+        let first = TestWindow.new(id: 1, parent: root)
+        let second = TestWindow.new(id: 2, parent: root)
+        try await workspace.layoutWorkspace()
+        startDragging(first)
+        let resting = point(in: second, 0.3, 0.5)
+        drag.update(pointer: resting, at: start)
+        drag.update(pointer: resting, at: start + .milliseconds(399))
+        #expect(!drag.isRearranging)
+        drag.update(pointer: resting, at: start + .milliseconds(400))
+        #expect(drag.drop == .beside(second, .left))
+    }
+
+    /// A move whose first step changed the size of the window is a resize of its left or top edge: the size that it had after
+    /// the last layout tells (see moveTilingWindow)
+    @Test func testFirstStepThatChangesTheSizeIsAResize() async throws {
+        let workspace = shownWorkspace()
+        let root = workspace.rootTilingContainer
+        let window = TestWindow.new(id: 1, parent: root)
+        #expect(!window.isResized(to: CGSize(width: 500, height: 500))) // Never laid out: nothing to tell
+        try await workspace.layoutWorkspace()
+        let size = window.observedFrame.orDie().size
+        #expect(!window.isResized(to: size))
+        #expect(!window.isResized(to: CGSize(width: size.width + 0.5, height: size.height - 0.5))) // Rounding
+        #expect(window.isResized(to: CGSize(width: size.width + 1, height: size.height)))
+        #expect(window.isResized(to: CGSize(width: size.width, height: size.height - 1)))
     }
 
     @Test func testReleaseOverItsOwnTileChangesNothing() async throws {
@@ -203,6 +243,39 @@ struct WindowDragTest {
         drag.update(pointer: pointer, at: start + .milliseconds(30))
         #expect(drag.drop == .swap(third))
         assertEquals(drag.preview, [rect(965, 10, 945, 1059), rect(10, 10, 945, 1059)])
+    }
+
+    /// The screen changed its size (the external display took the place of the built-in one), and no session refreshed the
+    /// monitors yet: the steps of the drag run light sessions, which cancel the session that would. The preview shows
+    /// the layout of the screen as it is now, and the window stays where the preview showed it after the sessions that
+    /// follow the release
+    @Test func testPreviewAfterTheScreenChangedItsSize() async throws {
+        let workspace = shownWorkspace()
+        let root = workspace.rootTilingContainer
+        let first = TestWindow.new(id: 1, parent: root)
+        TestWindow.new(id: 2, parent: root)
+        let third = TestWindow.new(id: 3, parent: root)
+        try await workspace.layoutWorkspace()
+
+        setTestMonitorSize(CGSize(width: 2560, height: 1707))
+        startDragging(first)
+        drag.update(pointer: CGPoint(x: 1800, y: 500), at: start) // The third window, on the screen before and after
+        #expect(drag.drop == .swap(third))
+        let preview = drag.preview
+        assertEquals(preview.first, rect(1708.3333333333333, 10, 841.6666666666666, 1686))
+
+        try await release(workspace)
+        gcMonitors() // The complete refresh session that follows
+        try await workspace.layoutWorkspace()
+        assertEquals(first.lastAppliedLayoutPhysicalRect, preview.first)
+
+        // The screen changes during the drag while the mouse rests: the preview follows
+        startDragging(first)
+        drag.update(pointer: CGPoint(x: 300, y: 500), at: start)
+        #expect(drag.drop == .swap(third))
+        setTestMonitorSize(CGSize(width: 1920, height: 1080))
+        drag.update(pointer: CGPoint(x: 300, y: 500), at: start + .milliseconds(30))
+        assertEquals(drag.preview.first, rect(10, 10, 628.3333333333334, 1059))
     }
 
     // MARK: Rearrange

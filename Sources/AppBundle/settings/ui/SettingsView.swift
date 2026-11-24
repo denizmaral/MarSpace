@@ -233,6 +233,15 @@ private struct GeneralPane: View {
                     .buttonStyle(.plain)
                 }
             }
+
+            Section("Dragging a window") {
+                LabeledContent {
+                    ValueSlider(value: $general.dragRearrangeDelay, range: 250 ... 2000, step: 50, unit: "ms")
+                } label: {
+                    Text("Hold to rearrange")
+                    Text("A quick drag swaps two windows. Hold the mouse still this long while dragging to put the window next to another one, or along an edge of the screen")
+                }
+            }
         }
         .formStyle(.grouped)
     }
@@ -546,11 +555,16 @@ extension ARGB {
 struct ValueSlider: View {
     @Binding var value: Int
     let range: ClosedRange<Int>
+    /// The values are multiples of it
+    var step = 1
     let unit: String
 
     var body: some View {
         HStack(spacing: 10) {
-            Slider(value: Binding(get: { Double(value) }, set: { value = Int($0.rounded()) }), in: Double(range.lowerBound) ... Double(range.upperBound))
+            Slider(
+                value: Binding(get: { Double(value) }, set: { value = Int(($0 / Double(step)).rounded()) * step }),
+                in: Double(range.lowerBound) ... Double(range.upperBound),
+            )
                 .frame(minWidth: 160)
             Text("\(value) \(unit)")
                 .monospacedDigit()

@@ -46,6 +46,9 @@ struct Settings: Codable, Sendable, Equatable {
         var oppositeOrientationForNestedContainers = true
         var accordionPadding = 30
         var automaticallyUnhideMacosHiddenApps = false
+        /// How long the mouse rests while a window is dragged before the drag rearranges the layout instead of swapping,
+        /// in milliseconds (see WindowDrag)
+        var dragRearrangeDelay = 750
     }
 
     /// See ``General/trackpadScrollModifier``

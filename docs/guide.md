@@ -54,8 +54,8 @@ with it: the focus stays on the window that you moved.
 the focus border (also while the border is off) shows where the window goes when you let go of it.
 
 - A quick drag swaps the window with the window under the mouse. Both places are outlined, dashed, with ⇄.
-- Hold the mouse still for ¾ of a second while you drag, and the drag changes the layout instead, until you let go. The
-  space that the window gets is filled. Over another window, the window goes next to it, on the side that the mouse is
+- Hold the mouse still for ¾ of a second while you drag (Settings › General › Hold to rearrange), and the drag changes
+  the layout instead, until you let go. The space that the window gets is filled. Over another window, the window goes next to it, on the side that the mouse is
   nearest to, and takes half of its tile: the other windows keep theirs. Near an edge of the screen (its outer twelfth), the
   window takes the whole edge of the workspace: a column at the left or the right, a row at the top or the bottom. On a
   scrolling workspace, the left and the right side of a window make a column of its own, the top and the bottom stack
