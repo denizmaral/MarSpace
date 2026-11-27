@@ -42,7 +42,8 @@ enum ScrollAnimation {
 
     static func start(_ newSlides: [Slide]) {
         // The windows of a slide that is under way and doesn't go on: where it was taking them
-        let ended = slides.values.filter { slide in !newSlides.contains { $0.window.windowId == slide.window.windowId } }
+        let goingOn = Set(newSlides.map(\.window.windowId))
+        let ended = slides.values.filter { !goingOn.contains($0.window.windowId) }
         slides = Dictionary(newSlides.map { ($0.window.windowId, $0) }, uniquingKeysWith: { _, last in last })
         write {
             for slide in ended { slide.window.setAxFrame(slide.final, slide.size) }

@@ -24,7 +24,12 @@ final class SettingsStore {
         set { update { $0 = newValue } }
     }
 
-    private(set) var problems: [SettingsProblem]
+    private(set) var problems: [SettingsProblem] {
+        didSet { problemsByLocation = Self.byLocation(problems) }
+    }
+    /// The problems at each location or below it, see ``problems(at:)``: each row of the settings window looks its problems
+    /// up, without a pass over all problems
+    private var problemsByLocation: [String: [SettingsProblem]] = [:]
 
     /// The last removal (a rule, a shortcut, a workspace, …): the settings window offers to undo it for a while
     private(set) var removal: Removal? = nil
@@ -58,14 +63,31 @@ final class SettingsStore {
         runWindowRule: @escaping @MainActor (IdentifiedList<Settings.WindowRule>.ID) async -> Void = { _ in },
     ) {
         current = settings
-        problems = settings.compile().problems
+        let problems = settings.compile().problems
+        self.problems = problems
         self.repository = repository
         self.applyToEngine = applyToEngine
         self.runWindowRule = runWindowRule
+        problemsByLocation = Self.byLocation(problems) // An initializer doesn't run `didSet`
     }
 
-    func problems(at location: String) -> [SettingsProblem] {
-        problems.filter { $0.location == location || $0.location.hasPrefix(location + " › ") }
+    /// At the location, or below it: "Window rules › 1" has the problems of "Window rules › 1 › Action 2" too. In their order
+    func problems(at location: String) -> [SettingsProblem] { problemsByLocation[location] ?? [] }
+
+    /// Each problem is at its location and at every location above it: each part of the location before a " › "
+    static func byLocation(_ problems: [SettingsProblem]) -> [String: [SettingsProblem]] {
+        let separator = " › "
+        var result: [String: [SettingsProblem]] = [:]
+        for problem in problems {
+            let location = problem.location
+            result[location, default: []].append(problem)
+            var start = location.startIndex
+            while let range = location.range(of: separator, range: start ..< location.endIndex) {
+                result[String(location[..<range.lowerBound]), default: []].append(problem)
+                start = location.index(after: range.lowerBound)
+            }
+        }
+        return result
     }
 
     // MARK: Changes

@@ -149,8 +149,9 @@ enum AxPermissionStatus: Equatable {
     }
     // An empty workspace is kept only if it's persistent: a favorite one is in the strips of the menu bar item anyway
     let favorites = model.experimentalUISettings.favoriteWorkspaces
-    if favorites.contains(where: { name in !workspaces.contains { $0.name == name } }) {
-        for name in favorites where !workspaces.contains(where: { $0.name == name }) {
+    var names = Set(workspaces.map(\.name))
+    if favorites.contains(where: { !names.contains($0) }) {
+        for name in favorites where names.insert(name).inserted { // A favorite that is listed twice is added once
             workspaces.append(WorkspaceViewModel(
                 name: name,
                 suffix: "",
@@ -163,7 +164,8 @@ enum AxPermissionStatus: Equatable {
                 hasFullscreenWindows: false,
             ))
         }
-        workspaces.sort { $0.name.toLogicalSegments() < $1.name.toLogicalSegments() }
+        // The segments of each name once, not for every comparison
+        workspaces = workspaces.map { ($0.name.toLogicalSegments(), $0) }.sorted { $0.0 < $1.0 }.map(\.1)
     }
     model.update(\.workspaces, workspaces)
     var items = sortedMonitors.map {

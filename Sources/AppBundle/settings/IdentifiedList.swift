@@ -11,13 +11,21 @@ struct IdentifiedList<Element: Sendable>: Sendable {
     /// In the order of the elements
     private(set) var ids: [ID]
     private var elements: [Element]
+    /// Where each id is in `ids`: a row of the settings window finds its element without a pass over the list. Every
+    /// change of `ids` updates it
+    private var positions: [ID: Int]
 
     init(_ elements: [Element]) {
         self.elements = elements
         ids = elements.map { _ in ID() }
+        positions = Self.positions(of: ids)
     }
 
-    func index(of id: ID) -> Int? { ids.firstIndex(of: id) }
+    private static func positions(of ids: [ID]) -> [ID: Int] {
+        Dictionary(uniqueKeysWithValues: zip(ids, ids.indices)) // The ids are unique: each one is made once
+    }
+
+    func index(of id: ID) -> Int? { positions[id] }
 
     /// nil: no element has this id (anymore). Setting nil removes the element
     subscript(id id: ID) -> Element? {
@@ -37,6 +45,7 @@ struct IdentifiedList<Element: Sendable>: Sendable {
         pairs.move(fromOffsets: source, toOffset: destination)
         ids = pairs.map(\.0)
         elements = pairs.map(\.1)
+        positions = Self.positions(of: ids)
     }
 
     /// The ids move with their elements (the sort of the standard library writes the elements back by position)
@@ -45,6 +54,7 @@ struct IdentifiedList<Element: Sendable>: Sendable {
         try pairs.sort { try areInIncreasingOrder($0.1, $1.1) }
         ids = pairs.map(\.0)
         elements = pairs.map(\.1)
+        positions = Self.positions(of: ids)
     }
 
     /// The elements that stay keep their ids
@@ -57,6 +67,7 @@ struct IdentifiedList<Element: Sendable>: Sendable {
         }
         ids = keptIds
         elements = keptElements
+        positions = Self.positions(of: ids)
     }
 }
 
@@ -76,12 +87,15 @@ extension IdentifiedList: RandomAccessCollection, MutableCollection, RangeReplac
     mutating func replaceSubrange<C: Collection>(_ subrange: Range<Int>, with newElements: C) where C.Element == Element {
         elements.replaceSubrange(subrange, with: newElements)
         ids.replaceSubrange(subrange, with: newElements.map { _ in ID() })
+        positions = Self.positions(of: ids)
     }
 
     /// Sorting and other reorderings swap the ids with their elements
     mutating func swapAt(_ i: Int, _ j: Int) {
         elements.swapAt(i, j)
         ids.swapAt(i, j)
+        positions[ids[i]] = i
+        positions[ids[j]] = j
     }
 }
 
