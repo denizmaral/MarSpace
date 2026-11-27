@@ -119,10 +119,12 @@ final class MacWindow: Window {
 
     // skipClosedWindowsCache is an optimization when it's definitely not necessary to cache closed window.
     //                        If you are unsure, it's better to pass `false`
+    /// - Returns: false if the window was already garbage collected
     @MainActor
-    func garbageCollect(skipClosedWindowsCache: Bool) {
+    @discardableResult
+    func garbageCollect(skipClosedWindowsCache: Bool) -> Bool {
         if MacWindow.allWindowsMap.removeValue(forKey: windowId) == nil {
-            return
+            return false
         }
         if !skipClosedWindowsCache { cacheClosedWindowIfNeeded() }
         let parent = unbindAsClosed().parent
@@ -132,6 +134,7 @@ final class MacWindow: Window {
             isClosedWindowAppRunning: RunningApps.isRunning(pid: app.pid) && isProcessAlive(app.pid),
             frontmost: RunningApps.frontmostHistory,
         )
+        return true
     }
 
     override func getTitle(_ cm: CancellationMode) async throws -> String { try await macApp.getAxTitle(windowId, cm) ?? "" }
@@ -154,9 +157,10 @@ final class MacWindow: Window {
     // todo it's part of the window layout and should be moved to layoutRecursive.swift
     /// - Parameter tile: the size of the tile of a tiling window (see ``Workspace/tileSizesWhileHidden()``). The window
     ///   gets it in the corner
+    /// - Parameter nodeMonitorInfo: the monitor of the workspace of the window, which the caller knows: not walked up to
+    ///   for every window
     @MainActor
-    func hideInCorner(_ corner: OptimalHideCorner, tile: CGSize?) async throws {
-        guard let nodeMonitorInfo else { return }
+    func hideInCorner(_ corner: OptimalHideCorner, tile: CGSize?, on nodeMonitorInfo: MonitorInfo) async throws {
         // Don't accidentally override prevUnhiddenEmulationPosition in case of subsequent `hideInCorner` calls
         if !isHiddenInCorner {
             guard let windowRect = try await getAxRect(.cancellable) else { return }

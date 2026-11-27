@@ -176,11 +176,12 @@ private func refresh() async throws {
         .refreshAllAndGetAliveWindowIds(frontmostAppBundleId: RunningApps.frontmost?.bundleId)
     let aliveWindowIds = mapping.values.flatMap(\.keys).toSet()
 
-    for window in MacWindow.allWindows {
-        if !aliveWindowIds.contains(window.windowId) {
-            window.lifeStatus = .dead
-            window.garbageCollect(skipClosedWindowsCache: false)
-        }
+    // The first closed window caches the world: the others are in it (see cacheClosedWindowIfNeeded), it isn't gathered
+    // again for each of them
+    var isWorldCached = false
+    for window in MacWindow.allWindows where !aliveWindowIds.contains(window.windowId) {
+        window.lifeStatus = .dead
+        if window.garbageCollect(skipClosedWindowsCache: isWorldCached) { isWorldCached = true }
     }
     for (app, windows) in mapping {
         for (windowId, lifeStatus) in windows {
@@ -234,10 +235,11 @@ private func layoutWorkspaces() async throws {
         try await workspace.layoutWorkspace()
     }
     for workspace in Workspace.all where !workspace.isVisible {
-        let corner = monitorToOptimalHideCorner[workspace.workspaceMonitorInfo.rect.topLeftCorner] ?? .bottomRightCorner
+        let monitor = workspace.workspaceMonitorInfo
+        let corner = monitorToOptimalHideCorner[monitor.rect.topLeftCorner] ?? .bottomRightCorner
         let tiles = workspace.tileSizesWhileHidden()
         for window in workspace.windowsToHideInCorner {
-            try await (window as! MacWindow).hideInCorner(corner, tile: tiles[window]) // todo as!
+            try await (window as! MacWindow).hideInCorner(corner, tile: tiles[window], on: monitor) // todo as!
         }
     }
 }
