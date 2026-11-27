@@ -171,6 +171,7 @@ extension Workspace {
     }
     _lastKnownFocus = frozenFocus
     wasLastKnownFocusInMacosFullscreen = focus.windowOrNil?.parent is MacosFullscreenWindowsContainer
+    updateMacosFullscreenSpaces() // Also the focus that the mouse moved (the sessions of focus-follows-mouse)
 
     if onFocusChangedRecursionGuard { return }
     onFocusChangedRecursionGuard = true

@@ -274,4 +274,43 @@ struct PopOutCommandTest {
         assertEquals(workspace.rootTilingContainer.layoutDescription, tiles)
         assertEquals(window.getWeight(.v), 2)
     }
+
+    /// The focus went to a window in macOS fullscreen on another workspace (it has a Space of its own) and came back: the
+    /// popped out window stayed on its workspace, and pops back into its tile
+    @Test func testItDoesNotComeAlongToAMacosFullscreenSpace() async {
+        let first = Workspace.get(byName: "A")
+        let window = TestWindow.new(id: 1, parent: first.rootTilingContainer)
+        TestWindow.new(id: 2, parent: first.rootTilingContainer, adaptiveWeight: 2)
+        let tiles = first.rootTilingContainer.layoutDescription
+        #expect(window.focusWindow())
+        await run("pop-out")
+
+        let fullscreen = TestWindow.new(id: 3, parent: Workspace.get(byName: "B").macOsNativeFullscreenWindowsContainer)
+        #expect(fullscreen.focusWindow())
+        Workspace.movePinnedWindowsToVisibleWorkspaces()
+        assertEquals(window.nodeWorkspace, first)
+
+        #expect(window.focusWindow()) // Back from the Space of the fullscreen window
+        Workspace.movePinnedWindowsToVisibleWorkspaces()
+        assertEquals(window.nodeWorkspace, first)
+        await run("pop-out")
+        assertEquals(first.rootTilingContainer.layoutDescription, tiles)
+    }
+
+    /// Back on the desktop, the pinned window comes along to the workspaces that it shows again
+    @Test func testItComesAlongAgainAfterTheMacosFullscreenSpace() async {
+        let first = Workspace.get(byName: "A")
+        let window = TestWindow.new(id: 1, parent: first.rootTilingContainer)
+        #expect(window.focusWindow())
+        await run("pop-out")
+        let fullscreen = TestWindow.new(id: 2, parent: Workspace.get(byName: "B").macOsNativeFullscreenWindowsContainer)
+        #expect(fullscreen.focusWindow())
+        Workspace.movePinnedWindowsToVisibleWorkspaces()
+        #expect(window.focusWindow())
+        Workspace.movePinnedWindowsToVisibleWorkspaces()
+
+        await run("workspace C")
+        Workspace.movePinnedWindowsToVisibleWorkspaces()
+        assertEquals(window.nodeWorkspace?.name, "C")
+    }
 }
