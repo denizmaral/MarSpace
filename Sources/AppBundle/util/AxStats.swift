@@ -71,11 +71,14 @@ final class SessionAxCost: Sendable {
         var counters = AxStats.Counters()
         var duration: Duration? = nil
         var jobsDuration: Duration? = nil
+        var footprintMegabytes: Int? = nil
     }
 
     private let name: String
     private let start = ContinuousClock.now
     private let state = Mutex(State())
+    /// How long the session waited for the queue (see SessionQueue). nil: it didn't use it (a query)
+    private let wait = SessionQueue.wait
 
     init(_ name: String) { self.name = name }
 
@@ -92,16 +95,24 @@ final class SessionAxCost: Sendable {
     /// The session is over, its jobs may still be under way
     func sessionDidFinish() {
         let duration = ContinuousClock.now - start
-        state.withLock { $0.duration = $0.duration ?? duration }
+        let footprint = MemoryFootprint.megabytes
+        state.withLock {
+            $0.duration = $0.duration ?? duration
+            $0.footprintMegabytes = $0.footprintMegabytes ?? footprint
+        }
     }
 
     deinit {
         let now = ContinuousClock.now - start
-        let (ax, duration, jobs) = state.withLock { ($0.counters, $0.duration ?? now, $0.jobsDuration) }
+        let (ax, duration, jobs, footprint) = state.withLock { ($0.counters, $0.duration ?? now, $0.jobsDuration, $0.footprintMegabytes) }
         let jobsDuration = max(duration, jobs ?? duration)
         let outside = AxStats.callsOutsideOfSessions.total
+        let queue = wait.map { wait in
+            " queuedMs=\(wait.queued.milliseconds) depth=\(wait.depth)" +
+                (wait.coalesced.map { " coalesced=\($0)" } ?? "") + (wait.isRerun.map { " rerun=\($0)" } ?? "")
+        } ?? ""
         perfLogger.debug(
-            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds) outsideOfSessions=\(outside)",
+            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
         )
     }
 }

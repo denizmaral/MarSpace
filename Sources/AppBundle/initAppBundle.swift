@@ -28,13 +28,16 @@ import Synchronization
                 .min()?
                 .focusWorkspace()
         }
-        await runHeavyCompleteRefreshSession(
-            .startup,
-            // It's important for the first initialization to be non cancellable
-            // to make sure that isStartup propagates to all places
-            assumeCancellable: false,
-            layoutWorkspaces: false,
-        )
+        // Before every other session: a hotkey that is pressed meanwhile waits (see SessionQueue)
+        try? await SessionQueue.shared.exclusively(.startup, "heavy startup") {
+            await runHeavyCompleteRefreshSession(
+                .startup,
+                // It's important for the first initialization to be non cancellable
+                // to make sure that isStartup propagates to all places
+                assumeCancellable: false,
+                layoutWorkspaces: false,
+            )
+        }
         try await runLightSession(.startup, .forceRun) {
             _ = await config.afterStartupCommand.run(.defaultEnv, .emptyStdin)
         }

@@ -1,9 +1,6 @@
 import AppKit
 import Common
 
-@MainActor
-private var activeRefreshTask: Task<(), any Error>? = nil
-
 /// The startup session (see initAppBundle) registers the windows that are there and puts them back into the layout of
 /// the previous run. No other complete refresh session is started before it's over: the two would take turns (the
 /// settings are applied right before, which asks for a session), and the other one registered windows as new ones,
@@ -25,20 +22,8 @@ func scheduleCancellableCompleteRefreshSession(
         return
     }
     if !isStartupSessionOver { return }
-    activeRefreshTask?.cancel()
-    // The session that asked for it is over: the complete refresh session counts its own accessibility calls, and the
-    // task doesn't keep the cost of the asking session (it's logged when its jobs are done, see SessionAxCost)
-    activeRefreshTask = AxStats.$session.withValue(nil) { Task.startUnstructured { @MainActor in
-        // Coalesce bursts of events (e.g. AX moved/resized notifications during window animations). A newer event
-        // cancels this task while it sleeps, before it makes any accessibility calls. One frame of latency
-        try await Task.sleep(for: .milliseconds(16))
-        try checkCancellation()
-        await runHeavyCompleteRefreshSession(
-            event,
-            assumeCancellable: true,
-            optimisticallyPreLayoutWorkspaces: optimisticallyPreLayoutWorkspaces,
-        )
-    } }
+    // A burst of events is one session, one that runs isn't canceled by them: see SessionQueue
+    SessionQueue.shared.scheduleHeavy(event, optimisticallyPreLayoutWorkspaces: optimisticallyPreLayoutWorkspaces)
 }
 
 @MainActor
@@ -100,10 +85,15 @@ func runLightSession<T>(
 ) async throws -> T {
     let state = signposter.beginInterval(#function, "event: \(event) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
     defer { signposter.endInterval(#function, state) }
-    if !readOnly {
-        activeRefreshTask?.cancel() // Give priority to runSession
-        activeRefreshTask = nil
+    if readOnly { return try await lightSession(event, readOnly: true, body: body) }
+    // One at a time with the other sessions that change the model; it cancels a heavy one that runs (see SessionQueue)
+    return try await SessionQueue.shared.exclusively(event.isStartup ? .startup : .light, "light \(event)") {
+        try await lightSession(event, readOnly: false, body: body)
     }
+}
+
+@MainActor
+private func lightSession<T>(_ event: RefreshSessionEvent, readOnly: Bool, body: @MainActor () async throws -> T) async throws -> T {
     let axCost = SessionAxCost(readOnly ? "query \(event)" : "light \(event)")
     defer { axCost.sessionDidFinish() }
     return try await $refreshSessionEvent.withValue(event) { try await AxStats.$session.withValue(axCost) {
