@@ -200,9 +200,10 @@ extension TilingContainer {
     fileprivate func snapshot<WindowId>(_ windowId: (Window) -> WindowId?, _ away: AwayWindowPlaces<WindowId>) -> TilingTreeSnapshot<WindowId>.Container? {
         let orientation = orientation
         let awayChildren = away.children[ObjectIdentifier(self)] ?? []
+        let awayChildrenByIndex = Dictionary(grouping: awayChildren, by: \.index) // In their order
         var children: [TilingTreeSnapshot<WindowId>.Node] = []
         for (index, child) in self.children.enumerated() {
-            children += awayChildren.filter { $0.index == index }.map(\.node)
+            children += awayChildrenByIndex[index]?.map(\.node) ?? []
             let node: TilingTreeSnapshot<WindowId>.Node? = switch child.tilingTreeNodeCasesOrDie() {
                 case .window(let window): windowId(window).map { .window(id: $0, weight: child.getWeight(orientation)) }
                 case .tilingContainer(let container): container.snapshot(windowId, away).map { .container($0) }
@@ -273,11 +274,17 @@ extension TilingTreeSnapshot.Container {
 
     /// The windows of the snapshot: the tiles, or the floating windows that remember their places
     func windowIds(areAway: Bool) -> [WindowId] {
-        children.flatMap { child -> [WindowId] in
+        var result: [WindowId] = []
+        collectWindowIds(areAway: areAway, into: &result)
+        return result
+    }
+
+    private func collectWindowIds(areAway: Bool, into result: inout [WindowId]) {
+        for child in children {
             switch child {
-                case .window(let id, _): areAway ? [] : [id]
-                case .away(let id, _): areAway ? [id] : []
-                case .container(let container): container.windowIds(areAway: areAway)
+                case .window(let id, _): if !areAway { result.append(id) }
+                case .away(let id, _): if areAway { result.append(id) }
+                case .container(let container): container.collectWindowIds(areAway: areAway, into: &result)
             }
         }
     }

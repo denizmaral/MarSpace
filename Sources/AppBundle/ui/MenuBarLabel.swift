@@ -643,6 +643,8 @@ struct StripEntry {
 /// A workspace that is gone (an empty workspace that was left) stays where it was, until it has shrunk away
 func stripEntries(from fromListed: [WorkspaceViewModel], to toListed: [WorkspaceViewModel]) -> [StripEntry] {
     let fromByName = Dictionary(fromListed.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+    // Where each name is in the strip before, in order: a favorite that is listed twice is there twice
+    let fromIndices = Dictionary(grouping: fromListed.indices, by: { fromListed[$0].name })
     let toNames = Set(toListed.map(\.name))
     var result: [StripEntry] = []
     var fromIndex = 0
@@ -654,7 +656,7 @@ func stripEntries(from fromListed: [WorkspaceViewModel], to toListed: [Workspace
         }
     }
     for workspace in toListed {
-        if fromByName[workspace.name] != nil, let index = fromListed[fromIndex...].firstIndex(where: { $0.name == workspace.name }) {
+        if let index = fromIndices[workspace.name]?.first(where: { $0 >= fromIndex }) {
             appendGone(until: index)
             fromIndex = index + 1
         }
@@ -662,6 +664,13 @@ func stripEntries(from fromListed: [WorkspaceViewModel], to toListed: [Workspace
     }
     appendGone(until: fromListed.count)
     return result
+}
+
+extension [WorkspaceViewModel] {
+    /// The first index of each name, as `firstIndex` finds it
+    var firstIndexByName: [String: Int] {
+        Dictionary(zip(map(\.name), indices), uniquingKeysWith: { first, _ in first })
+    }
 }
 
 /// The width of a name in the rounded system font, to lay out the strips before they are drawn

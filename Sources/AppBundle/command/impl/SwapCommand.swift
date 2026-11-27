@@ -119,18 +119,28 @@ extension TreeNode {
     /// left side. Of an accordion, the window that it shows
     @MainActor
     fileprivate func windowsFacing(_ direction: CardinalDirection) -> [Window] {
+        var result: [Window] = []
+        collectWindowsFacing(direction, into: &result)
+        return result
+    }
+
+    /// Into one array: not an array per level of the tree, copied into the one above
+    @MainActor
+    private func collectWindowsFacing(_ direction: CardinalDirection, into result: inout [Window]) {
         switch tilingTreeNodeCasesOrDie() {
             case .window(let window):
-                return window.lifeStatus.isInhabited ? [window] : []
+                if window.lifeStatus.isInhabited { result.append(window) }
             case .tilingContainer(let container):
                 if container.layout == .accordion {
-                    return container.mostRecentInhabitedChild?.windowsFacing(direction) ?? []
+                    container.mostRecentInhabitedChild?.collectWindowsFacing(direction, into: &result)
+                    return
                 }
                 let children = container.inhabitedChildren
                 if container.orientation == direction.orientation {
-                    return (direction.isPositive ? children.first : children.last)?.windowsFacing(direction) ?? []
+                    (direction.isPositive ? children.first : children.last)?.collectWindowsFacing(direction, into: &result)
+                    return
                 }
-                return children.flatMap { $0.windowsFacing(direction) }
+                for child in children { child.collectWindowsFacing(direction, into: &result) }
         }
     }
 }

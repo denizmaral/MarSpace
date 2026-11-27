@@ -187,8 +187,7 @@ extension TreeNode {
         _children = state.children
         _parent = state.parent
         adaptiveWeight = state.adaptiveWeight
-        for child in Array(_mruChildren) { _mruChildren.remove(child) }
-        for child in state.mostRecentChildren.reversed() { _mruChildren.pushOrRaise(child) }
+        _mruChildren.replaceAll(with: state.mostRecentChildren)
         bindingGeneration = state.bindingGeneration
         unboundStacktrace = state.unboundStacktrace
         lastAppliedLayoutPhysicalRect = state.lastAppliedLayoutPhysicalRect

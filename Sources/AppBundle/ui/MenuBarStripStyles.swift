@@ -549,9 +549,10 @@ struct WorkspaceMatrix: View {
         let t = CGFloat(progress.easedInOut)
         let fromColumns = Self.columns(fromStrip.count), toColumns = Self.columns(toStrip.count)
         var marks: [(center: CGPoint, mark: Mark)] = []
+        let fromIndices = fromStrip.firstIndexByName, toIndices = toStrip.firstIndexByName
         for entry in stripEntries(from: fromStrip, to: toStrip) {
-            let fromCenter = fromStrip.firstIndex { $0.name == entry.name }.map { Self.cellRect($0, columns: fromColumns) }
-            let toCenter = toStrip.firstIndex { $0.name == entry.name }.map { Self.cellRect($0, columns: toColumns) }
+            let fromCenter = fromIndices[entry.name].map { Self.cellRect($0, columns: fromColumns) }
+            let toCenter = toIndices[entry.name].map { Self.cellRect($0, columns: toColumns) }
             let center = lerp(fromCenter ?? toCenter ?? .zero, toCenter ?? fromCenter ?? .zero, t)
             marks.append((CGPoint(x: center.midX, y: center.midY), Self.mark(entry.from).mixed(with: Self.mark(entry.to), t)))
         }

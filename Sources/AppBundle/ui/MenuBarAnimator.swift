@@ -23,9 +23,14 @@ struct MenuBarState: Equatable {
     /// Without favorites, all workspaces with windows, in the order of the workspaces
     /// Grouped by monitor, if asked for
     var strip: [WorkspaceViewModel] {
-        let strip = favorites.isEmpty
-            ? workspaces.filter(\.isListed)
-            : favorites.compactMap { name in workspaces.first { $0.name == name } } + workspaces.filter { $0.isVisible && !favorites.contains($0.name) }
+        let strip: [WorkspaceViewModel]
+        if favorites.isEmpty {
+            strip = workspaces.filter(\.isListed)
+        } else {
+            let byName = Dictionary(workspaces.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+            let favoriteNames = Set(favorites)
+            strip = favorites.compactMap { byName[$0] } + workspaces.filter { $0.isVisible && !favoriteNames.contains($0.name) }
+        }
         guard groupsByMonitor else { return strip }
         return strip.enumerated().sorted { ($0.element.monitorIndex, $0.offset) < ($1.element.monitorIndex, $1.offset) }.map(\.element)
     }
