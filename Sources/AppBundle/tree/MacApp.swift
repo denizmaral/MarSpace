@@ -360,7 +360,7 @@ final class MacApp: AbstractApp {
                 try checkCancellation()
                 let running = MainActorRef(running)
                 group.addTask { @Sendable @MainActor in
-                    guard let app = try await MacApp.registerWithinDeadline(running.value) else { return nil }
+                    guard let app = try await MacApp.registerWithinDeadline(running.value, .cancellable) else { return nil }
                     return (MainActorRef(app), try await app.aliveWindowIdsOrKnown(frontmostAppBundleId: frontmostAppBundleId))
                 }
             }
@@ -499,49 +499,40 @@ final class MacApp: AbstractApp {
 
     // MARK: An app that doesn't answer
 
-    /// How long a session waits for an app (see ``answer(_:orElse:_:)``). Measured on 2026-11-27: a healthy app answers
-    /// in milliseconds (the complete refresh sessions took 3-19 ms), one that launches within about a second (Chess
+    /// How long a session waits for an app (see ``AppAnswers``). Measured on 2026-11-27: a healthy app answers in
+    /// milliseconds (the complete refresh sessions took 3-19 ms), one that launches within about a second (Chess
     /// registered in 1 s). A hung app answers only after the timeout of the accessibility API, about 1.5 s for each
     /// request: a hotkey waited 1.5-4.5 s while the frontmost app was stopped
     static let answerDeadline: Duration = .seconds(1)
 
-    /// The app missed ``answerDeadline`` and hasn't answered since: the sessions don't ask it, and don't wait for it
-    @MainActor private(set) var isDegraded = false
+    /// Whether the app answers in time, see ``answer(_:orElse:_:)``
+    @MainActor private lazy var answers = AppAnswers(
+        deadline: Self.answerDeadline,
+        appName: { [weak self] in self.map { $0.name ?? "pid \($0.pid)" } ?? "an app that quit" },
+        probe: { [weak self] in self?.startProbe() },
+        didRecover: { scheduleCancellableCompleteRefreshSession(.appAnswered) },
+    )
 
     /// The apps that launched and weren't registered within ``answerDeadline`` (their accessibility subscriptions): a
-    /// session follows when they are, see ``registerWithinDeadline(_:)``
+    /// session follows when they are, see ``registerWithinDeadline(_:_:)``
     @MainActor private static var lateRegistrations: Set<pid_t> = []
 
-    /// What a session asks the app for: its answer within ``answerDeadline``. An app that doesn't answer in time (hung,
-    /// or very busy) isn't waited for: `fallback`, what MarSpace knows without asking, is the answer until the app answers
-    /// again (see ``didMissDeadline()``). Every request that a session waits for goes through here
-    ///
-    /// No deadline in the startup session (the apps that launch with the login are slow, and their windows find their
-    /// places of the previous run only while it runs), and for requests that can't be canceled
+    /// What a session asks the app for, through ``AppAnswers``: every request that a session waits for goes through
+    /// here. `fallback`: what MarSpace knows without asking, the answer while the app doesn't answer in time
     @MainActor
     private func answer<T: Sendable>(
         _ cm: CancellationMode,
         orElse fallback: @MainActor (MacApp) -> T,
         _ request: @escaping @MainActor @Sendable (MacApp) async throws -> T,
     ) async throws -> T {
-        if isDegraded { return fallback(self) }
         let app = MainActorRef(self)
-        if cm == .nonCancellable || isStartup { return try await request(app.value) }
-        switch try await withDeadline(Self.answerDeadline, { try await request(app.value) }) {
-            case .answered(let value): return value
-            case .deadlinePassed:
-                didMissDeadline()
-                return fallback(self)
-        }
+        return try await answers.answer(cm, orElse: { fallback(self) }) { try await request(app.value) }
     }
 
-    /// The request was canceled, its job waits behind the one that the app is busy with. A probe after it tells when the
-    /// app answers again (see ``probeUntilItAnswers(_:pid:)``): its windows are refreshed then
+    /// The request that missed the deadline waits behind the job that the app is busy with: a probe after it tells when
+    /// the app answers again (see ``probeUntilItAnswers(_:pid:)``)
     @MainActor
-    private func didMissDeadline() {
-        if isDegraded { return }
-        isDegraded = true
-        perfLogger.error("\(self.name ?? "pid \(self.pid)", privacy: .public) doesn't answer within \(String(describing: Self.answerDeadline), privacy: .public): the sessions go on without it until it answers")
+    private func startProbe() {
         let pid = pid
         thread?.runInLoopAsync(job: RunLoopJob(.nonCancellable), autoCheckCancelled: false) { [axApp] _ in
             MacApp.probeUntilItAnswers(axApp, pid: pid)
@@ -554,7 +545,7 @@ final class MacApp: AbstractApp {
     /// request timed out
     private static func probeUntilItAnswers(_ axApp: ThreadGuardedValue<AXUIElement>, pid: pid_t) {
         if axApp.threadGuarded.get(Ax.roleAttr) != nil {
-            Task.startUnstructured { @MainActor in MacApp.allAppsMap[pid]?.didAnswerAgain() }
+            Task.startUnstructured { @MainActor in MacApp.allAppsMap[pid]?.answers.didAnswerAgain() }
             return
         }
         Thread.sleep(forTimeInterval: 0.25) // It may fail right away (e.g. it quits): not in a loop that keeps the thread busy
@@ -563,21 +554,14 @@ final class MacApp: AbstractApp {
         }
     }
 
-    @MainActor
-    private func didAnswerAgain() {
-        guard isDegraded else { return }
-        isDegraded = false
-        perfLogger.info("\(self.name ?? "pid \(self.pid)", privacy: .public) answers again")
-        scheduleCancellableCompleteRefreshSession(.appAnswered)
-    }
-
     /// The app, registered within ``answerDeadline``. An app that launched and doesn't answer its accessibility
-    /// subscriptions in time isn't waited for: its registration goes on, and a session follows when it's done
+    /// subscriptions in time isn't waited for: its registration goes on, and a session follows when it's done. No deadline
+    /// for the same requests as in ``AppAnswers``
     @MainActor
-    static func registerWithinDeadline(_ running: RunningApp) async throws -> MacApp? {
+    static func registerWithinDeadline(_ running: RunningApp, _ cm: CancellationMode) async throws -> MacApp? {
         let pid = running.pid
         if let existing = allAppsMap[pid] { return existing }
-        if isStartup { return try await getOrRegister(running) }
+        if cm == .nonCancellable || isStartup { return try await getOrRegister(running) }
         if lateRegistrations.contains(pid) { return nil }
         let runningRef = MainActorRef(running)
         switch try await withDeadline(answerDeadline, { try await getOrRegister(runningRef.value).map(MainActorRef.init) }) {

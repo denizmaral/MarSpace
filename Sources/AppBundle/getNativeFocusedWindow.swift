@@ -5,21 +5,19 @@ import Common
 var appForTests: (any AbstractApp)? = nil
 
 @MainActor
-private var focusedApp: (any AbstractApp)? {
-    get async throws {
-        if isUnitTest {
-            return appForTests
-        } else {
-            check(appForTests == nil)
-            return switch RunningApps.frontmost {
-                case let frontmost?: try await MacApp.registerWithinDeadline(frontmost)
-                case nil: nil
-            }
+private func focusedApp(_ cm: CancellationMode) async throws -> (any AbstractApp)? {
+    if isUnitTest {
+        return appForTests
+    } else {
+        check(appForTests == nil)
+        return switch RunningApps.frontmost {
+            case let frontmost?: try await MacApp.registerWithinDeadline(frontmost, cm)
+            case nil: nil
         }
     }
 }
 
 @MainActor
 func getNativeFocusedWindow(_ cm: CancellationMode) async throws -> Window? {
-    try await focusedApp?.getFocusedWindow(cm)
+    try await focusedApp(cm)?.getFocusedWindow(cm)
 }
