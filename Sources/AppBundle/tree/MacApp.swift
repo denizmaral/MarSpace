@@ -535,16 +535,31 @@ final class MacApp: AbstractApp {
         }
     }
 
-    /// The request was canceled, its job waits behind the one that the app is busy with. Another job after it tells when
-    /// the app answers again: its windows are refreshed then
+    /// The request was canceled, its job waits behind the one that the app is busy with. A probe after it tells when the
+    /// app answers again (see ``probeUntilItAnswers(_:pid:)``): its windows are refreshed then
     @MainActor
     private func didMissDeadline() {
         if isDegraded { return }
         isDegraded = true
         perfLogger.error("\(self.name ?? "pid \(self.pid)", privacy: .public) doesn't answer within \(String(describing: Self.answerDeadline), privacy: .public): the sessions go on without it until it answers")
         let pid = pid
-        thread?.runInLoopAsync(job: RunLoopJob(.nonCancellable), autoCheckCancelled: false) { _ in
+        thread?.runInLoopAsync(job: RunLoopJob(.nonCancellable), autoCheckCancelled: false) { [axApp] _ in
+            MacApp.probeUntilItAnswers(axApp, pid: pid)
+        }
+    }
+
+    /// On the thread of the app: asks it for something that it always has, its role. That the thread got to the probe
+    /// doesn't mean that the app answers: the request that it was busy with may have timed out (the accessibility API
+    /// gives up after about 1.5 s), the app may still be hung. While the app doesn't answer, it's asked again, once its
+    /// request timed out
+    private static func probeUntilItAnswers(_ axApp: ThreadGuardedValue<AXUIElement>, pid: pid_t) {
+        if axApp.threadGuarded.get(Ax.roleAttr) != nil {
             Task.startUnstructured { @MainActor in MacApp.allAppsMap[pid]?.didAnswerAgain() }
+            return
+        }
+        Thread.sleep(forTimeInterval: 0.25) // It may fail right away (e.g. it quits): not in a loop that keeps the thread busy
+        Thread.current.runInLoopAsync(job: RunLoopJob(.nonCancellable), autoCheckCancelled: false) { _ in
+            probeUntilItAnswers(axApp, pid: pid)
         }
     }
 
