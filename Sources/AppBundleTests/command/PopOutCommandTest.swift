@@ -203,4 +203,75 @@ struct PopOutCommandTest {
         let snapshot = try #require(WindowPlacementSnapshot(data: WindowPlacementSnapshot.encode(placements, bootSession: 1)))
         assertEquals(snapshot.all, placements)
     }
+
+    /// macOS reported the popped out window gone, and it came back (MarSpace registers it again as a new window). The
+    /// closed windows cache puts it back where it was: popped out, and it pops back into its tile
+    @Test func testItStaysPoppedOutWhenItComesBack() async throws {
+        resetClosedWindowsCache()
+        defer { resetClosedWindowsCache() }
+        config.enableNormalizationFlattenContainers = true
+        config.enableNormalizationOppositeOrientationForNestedContainers = true
+        let workspace = Workspace.get(byName: name)
+        #expect(workspace.focusWorkspace()) // The cache has the workspaces of the monitors
+        var window: TestWindow!
+        workspace.rootTilingContainer.apply {
+            TestWindow.new(id: 1, parent: $0)
+            TilingContainer.newVTiles(parent: $0, adaptiveWeight: 1).apply {
+                window = TestWindow.new(id: 2, parent: $0, adaptiveWeight: 2)
+                TestWindow.new(id: 3, parent: $0, adaptiveWeight: 1)
+            }
+        }
+        let tiles = workspace.rootTilingContainer.layoutDescription
+        #expect(window.focusWindow())
+        await run("pop-out")
+        workspace.normalizeContainers()
+
+        cacheClosedWindowIfNeeded() // Gone
+        window.unbindFromParent()
+        let again = TestWindow.new(id: 2, parent: workspace.rootTilingContainer) // Back: placed like a new window
+        #expect(try await restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow: again))
+        workspace.normalizeContainers()
+        assertEquals(again.isFloating, true)
+        assertEquals(again.isPoppedOut, true)
+
+        #expect(again.focusWindow())
+        await run("pop-out")
+        workspace.normalizeContainers()
+        assertEquals(workspace.rootTilingContainer.layoutDescription, tiles)
+        assertEquals(again.getWeight(.v), 2)
+    }
+
+    /// Another window came back: the restore builds the tree again, the popped out window still has its tile there
+    @Test func testItKeepsItsTileWhenAnotherWindowComesBack() async throws {
+        resetClosedWindowsCache()
+        defer { resetClosedWindowsCache() }
+        config.enableNormalizationFlattenContainers = true
+        config.enableNormalizationOppositeOrientationForNestedContainers = true
+        let workspace = Workspace.get(byName: name)
+        #expect(workspace.focusWorkspace()) // The cache has the workspaces of the monitors
+        var window: TestWindow!
+        workspace.rootTilingContainer.apply {
+            TestWindow.new(id: 1, parent: $0)
+            TilingContainer.newVTiles(parent: $0, adaptiveWeight: 1).apply {
+                window = TestWindow.new(id: 2, parent: $0, adaptiveWeight: 2)
+                TestWindow.new(id: 3, parent: $0, adaptiveWeight: 1)
+            }
+        }
+        let tiles = workspace.rootTilingContainer.layoutDescription
+        #expect(window.focusWindow())
+        await run("pop-out")
+        workspace.normalizeContainers()
+
+        let other = TestWindow.new(id: 4, parent: Workspace.get(byName: "other").rootTilingContainer)
+        cacheClosedWindowIfNeeded()
+        #expect(try await restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow: other))
+        workspace.normalizeContainers()
+        assertEquals(window.isPoppedOut, true)
+
+        #expect(window.focusWindow())
+        await run("pop-out")
+        workspace.normalizeContainers()
+        assertEquals(workspace.rootTilingContainer.layoutDescription, tiles)
+        assertEquals(window.getWeight(.v), 2)
+    }
 }

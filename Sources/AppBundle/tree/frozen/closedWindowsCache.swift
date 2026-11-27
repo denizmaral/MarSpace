@@ -9,7 +9,7 @@ import Common
 /// so that once the screen is unlocked, AeroSpace could restore windows to where they were
 @MainActor private var closedWindowsCache = FrozenWorld(monitors: [], windowIds: [])
 
-struct FrozenMonitor: Sendable {
+struct FrozenMonitor {
     let visibleWorkspace: String
     let topLeftCorner: CGPoint
     let workspaces: [FrozenWorkspace]
@@ -21,19 +21,54 @@ struct FrozenMonitor: Sendable {
     }
 }
 
-struct FrozenWorkspace: Sendable {
+struct FrozenWorkspace {
     let name: String
-    let rootTilingNode: FrozenContainer
+    /// Also the places of the floating windows that remember their tiles (see ``TilingSlot``): the restore builds new
+    /// containers, the places that the windows remember are in the old ones. nil: the workspace has no tiling windows
+    let tilingTree: TilingTreeSnapshot<OpaqueWindowId>?
     let floatingWindows: [FrozenWindow]
-    let macosUnconventionalWindows: [FrozenWindow]
+    let macosUnconventionalWindows: [OpaqueWindowId]
 
     @MainActor init(_ workspace: Workspace) {
         name = workspace.name
-        rootTilingNode = FrozenContainer(workspace.rootTilingContainer)
+        tilingTree = workspace.tilingTreeSnapshot { $0.windowId }
         floatingWindows = workspace.floatingWindows.map(FrozenWindow.init)
         macosUnconventionalWindows =
-            workspace.macOsNativeHiddenAppsWindowsContainer.children.map { FrozenWindow($0 as! Window) } +
-            workspace.macOsNativeFullscreenWindowsContainer.children.map { FrozenWindow($0 as! Window) }
+            (workspace.macOsNativeHiddenAppsWindowsContainer.children + workspace.macOsNativeFullscreenWindowsContainer.children)
+                .map { ($0 as! Window).windowId }
+    }
+}
+
+/// A floating window, and what it knows about itself. A window that macOS reported gone and that comes back is registered
+/// again as a new window, it gets that back: a popped out window came back floating, but not pinned and popped out
+struct FrozenWindow {
+    let id: OpaqueWindowId
+    /// The window when the world was frozen. Another one with the same id was registered again
+    private weak var window: Window?
+    private let isPinned: Bool
+    private let poppedOut: PoppedOutOrigin?
+    private let lastPoppedOutFrame: Rect?
+    private let isFloatedByWorkspaceLayout: Bool
+
+    @MainActor init(_ window: Window) {
+        id = window.windowId
+        self.window = window
+        isPinned = window.isPinned
+        poppedOut = window.poppedOut
+        lastPoppedOutFrame = window.lastPoppedOutFrame
+        isFloatedByWorkspaceLayout = window.isFloatedByWorkspaceLayout
+    }
+
+    /// The window with the id, with what it knew when the world was frozen
+    @MainActor func restoredWindow() -> Window? {
+        guard let window = Window.get(byId: id) else { return nil }
+        if window !== self.window { // Registered again: it knows nothing
+            window.isPinned = isPinned
+            window.poppedOut = poppedOut
+            window.lastPoppedOutFrame = lastPoppedOutFrame
+            window.isFloatedByWorkspaceLayout = isFloatedByWorkspaceLayout
+        }
+        return window
     }
 }
 
@@ -56,6 +91,8 @@ struct FrozenWorkspace: Sendable {
     let monitors = globalUnsortedMonitorInfos
     let topLeftCornerToMonitorInfo = monitors.grouped { $0.rect.topLeftCorner }
 
+    // The floating windows first: the tree of a workspace has the places of floating windows of the others too (a pinned
+    // window came along to another workspace)
     for monitor in closedWindowsCache.monitors {
         for frozenWorkspace in monitor.workspaces {
             let workspace = Workspace.get(byName: frozenWorkspace.name)
@@ -63,15 +100,22 @@ struct FrozenWorkspace: Sendable {
                 .singleOrNil()?
                 .bindWorkspace(workspace)
             for frozenWindow in frozenWorkspace.floatingWindows {
-                MacWindow.get(byId: frozenWindow.id)?.bindAsFloatingWindow(to: workspace)
+                frozenWindow.restoredWindow()?.bindAsFloatingWindow(to: workspace)
             }
-            for frozenWindow in frozenWorkspace.macosUnconventionalWindows { // Will get fixed by normalizations
-                MacWindow.get(byId: frozenWindow.id)?.bindAsFloatingWindow(to: workspace)
+            for windowId in frozenWorkspace.macosUnconventionalWindows { // Will get fixed by normalizations
+                Window.get(byId: windowId)?.bindAsFloatingWindow(to: workspace)
             }
+        }
+    }
+    // Before the roots are unbound
+    let windows = Dictionary(Workspace.all.flatMap(\.allLeafWindowsRecursive).map { ($0.windowId, $0) }) { first, _ in first }
+    for monitor in closedWindowsCache.monitors {
+        for frozenWorkspace in monitor.workspaces {
+            let workspace = Workspace.get(byName: frozenWorkspace.name)
             let prevRoot = workspace.rootTilingContainer // Save prevRoot into a variable to avoid it being garbage collected earlier than needed
             let potentialOrphans = prevRoot.allLeafWindowsRecursive
             prevRoot.unbindFromParent()
-            restoreTreeRecursive(frozenContainer: frozenWorkspace.rootTilingNode, parent: workspace, index: INDEX_BIND_LAST)
+            if let tree = frozenWorkspace.tilingTree { workspace.restoreFrozenTilingTree(tree, windows) }
             for window in (potentialOrphans - workspace.rootTilingContainer.allLeafWindowsRecursive) {
                 try await window.relayoutWindow(on: workspace, .cancellable, forceTile: true)
             }
@@ -80,31 +124,6 @@ struct FrozenWorkspace: Sendable {
         _ = topLeftCornerToMonitorInfo[monitor.topLeftCorner]?
             .singleOrNil()?
             .setVisibleWorkspace(Workspace.get(byName: monitor.visibleWorkspace))
-    }
-    return true
-}
-
-@discardableResult
-@MainActor
-private func restoreTreeRecursive(frozenContainer: FrozenContainer, parent: NonLeafTreeNodeObject, index: Int) -> Bool {
-    let container = TilingContainer(
-        parent: parent,
-        adaptiveWeight: frozenContainer.weight,
-        frozenContainer.orientation,
-        frozenContainer.layout,
-        index: index,
-    )
-
-    for (index, child) in frozenContainer.children.enumerated() {
-        switch child {
-            case .window(let w):
-                // Stop the loop if can't find the window, because otherwise all the subsequent windows will have incorrect index
-                guard let window = MacWindow.get(byId: w.id) else { return false }
-                window.bind(to: container, adaptiveWeight: w.weight, index: index)
-            case .container(let c):
-                // There is no reason to continue
-                if !restoreTreeRecursive(frozenContainer: c, parent: container, index: index) { return false }
-        }
     }
     return true
 }
