@@ -1,11 +1,18 @@
 @testable import AppBundle
-import Common
+@testable import Common
 import Foundation
 import Testing
 
 @MainActor
 @Suite(.serializedGlobally)
 struct ClientServerTest {
+    @Test func testSocketBytesAreTheLeastSignificantFirst() {
+        #expect(UInt32(0x0403_0201).socketBytes == Data([1, 2, 3, 4]))
+        #expect(UInt32(socketBytes: Data([1, 2, 3, 4])) == 0x0403_0201)
+        #expect(UInt32(socketBytes: Data([9, 1, 2, 3, 4]).dropFirst()) == 0x0403_0201) // A slice: doesn't start at 0
+        #expect(UInt32(socketBytes: UInt32.max.socketBytes) == .max)
+    }
+
     @Test func testClientRequestJsonV1_decoding() {
         let data = """
             { "command": "deprecated", "args": ["foo", "bar"], "stdin": "stdin" }

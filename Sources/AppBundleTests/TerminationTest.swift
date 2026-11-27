@@ -16,10 +16,10 @@ struct TerminationTest {
     @Test func testEveryWayToQuitRunsTheTerminationHandlerOnce() {
         let handler = CountingHandler()
         let previous = terminationHandler
-        unsafe _terminationHandler = handler
+        terminationHandler = handler
         didRunTerminationHandler = false
         defer {
-            unsafe _terminationHandler = previous
+            terminationHandler = previous
             didRunTerminationHandler = false
         }
 

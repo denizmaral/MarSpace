@@ -166,7 +166,7 @@ extension URL {
 }
 
 public func eprint(_ msg: String) {
-    unsafe fputs(msg + "\n", stderr)
+    FileHandle.standardError.write(Data((msg + "\n").utf8))
 }
 
 public func exit(_ exitCode: Int32, out: String? = nil, err: String? = nil) -> Never {

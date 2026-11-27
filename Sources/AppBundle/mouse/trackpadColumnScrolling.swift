@@ -189,33 +189,44 @@ enum TrackpadColumnScrolling {
 
     static let shared = Mutex(Shared())
 
-    /// Created once, read by the callback on the thread of the tap (to enable it again after macOS disabled it)
-    nonisolated(unsafe) fileprivate static var tap: CFMachPort? = nil
+    /// Created once, used by the callback on the thread of the tap too (to enable it again after macOS disabled it).
+    /// `CFMachPort` isn't `Sendable`: it's used only under the lock
+    private static let tap = Mutex<CFMachPort?>(nil)
+
+    fileprivate static func enableTap(_ enable: Bool) {
+        tap.withLock { tap in if let tap { CGEvent.tapEnable(tap: tap, enable: enable) } }
+    }
 
     /// Starts the event tap, disabled until a monitor shows a scrolling workspace (see ``update()``)
     @MainActor
     static func start() {
-        guard !isUnitTest, unsafe tap == nil else { return }
-        let mask = CGEventMask(1) << CGEventMask(CGEventType.scrollWheel.rawValue)
-        guard let port = unsafe CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: mask,
-            callback: scrollEventTapCallback,
-            userInfo: nil,
-        ) else {
-            perfLogger.error("Can't create the event tap for the trackpad: no accessibility permission?")
-            return
+        guard !isUnitTest else { return }
+        let isCreated = tap.withLock { tap in
+            guard tap == nil else { return false }
+            let mask = CGEventMask(1) << CGEventMask(CGEventType.scrollWheel.rawValue)
+            tap = unsafe CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: mask,
+                callback: scrollEventTapCallback,
+                userInfo: nil,
+            )
+            guard let tap else {
+                perfLogger.error("Can't create the event tap for the trackpad: no accessibility permission?")
+                return false
+            }
+            CGEvent.tapEnable(tap: tap, enable: false)
+            return true
         }
-        unsafe tap = port
-        CGEvent.tapEnable(tap: port, enable: false)
+        guard isCreated else { return }
         let thread = Thread {
-            guard let port = unsafe TrackpadColumnScrolling.tap,
-                  let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0)
-            else { return }
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
-            CFRunLoopRun()
+            let isAdded = TrackpadColumnScrolling.tap.withLock { tap in
+                guard let tap, let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { return false }
+                CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+                return true
+            }
+            if isAdded { CFRunLoopRun() }
         }
         thread.name = "MarSpace trackpad scrolling"
         thread.qualityOfService = .userInteractive
@@ -239,7 +250,7 @@ enum TrackpadColumnScrolling {
     /// would leave it)
     @MainActor
     static func update() {
-        guard let port = unsafe tap else { return }
+        guard tap.withLock({ $0 != nil }) else { return }
         let workspaces = config.trackpadScrollsColumns && TrayMenuModel.shared.isEnabled
             ? globalUnsortedMonitorInfos.filter { $0.space == .desktop }.map(\.visibleWorkspace)
                 .filter { $0.rootTilingContainer.layout == .scrolling }
@@ -255,7 +266,7 @@ enum TrackpadColumnScrolling {
             defer { (shared.screens, shared.excluded, shared.ownWindows, shared.modifiers, shared.isReversed) = (screens, excluded, own, modifiers, isReversed) }
             return shared.screens.isEmpty != screens.isEmpty
         }
-        if changed { CGEvent.tapEnable(tap: port, enable: !screens.isEmpty) }
+        if changed { enableTap(!screens.isEmpty) }
     }
 
 
@@ -336,7 +347,7 @@ private func scrollEventTapCallback(
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             // macOS disables a tap that was too slow. It's enabled again if a monitor still shows a scrolling workspace
             let isWanted = TrackpadColumnScrolling.shared.withLock { !$0.screens.isEmpty }
-            if isWanted, let tap = unsafe TrackpadColumnScrolling.tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            if isWanted { TrackpadColumnScrolling.enableTap(true) }
             return unsafe Unmanaged.passUnretained(event)
         default:
             return unsafe Unmanaged.passUnretained(event)

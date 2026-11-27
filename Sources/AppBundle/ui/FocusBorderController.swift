@@ -408,7 +408,9 @@ private final class FocusBorderPanel: NSPanel {
         strokeMask.frame = bounds
         strokeMask.contentsScale = scale
         strokeMask.lineWidth = lineWidth
-        strokeMask.path = unsafe CGPath(roundedRect: strokeRect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        let strokePath = CGMutablePath()
+        strokePath.addRoundedRect(in: strokeRect, cornerWidth: radius, cornerHeight: radius)
+        strokeMask.path = strokePath
 
         border.color.paint(gradientLayer)
     }

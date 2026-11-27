@@ -1,12 +1,12 @@
 import AppKit
 import Common
 import Foundation
+import Synchronization
 
 @MainActor public func initAppBundle() {
     Task.startUnstructured {
         initTerminationHandler()
-        unsafe _isCli = false
-        unsafe _isUnitTest = false
+        processRole = .server
         initServerArgs()
         await waitForAccessibilityPermission_nonCancellable()
         if isDebug {
@@ -58,8 +58,9 @@ private let serverHelp = """
                               Useful if you want to use only debug-windows or other query commands.
     """
 
-nonisolated(unsafe) private var _serverArgs = ServerArgs()
-var serverArgs: ServerArgs { unsafe _serverArgs }
+/// Set once at the start, read on the threads of the apps too
+private let _serverArgs = Mutex(ServerArgs())
+var serverArgs: ServerArgs { _serverArgs.withLock { $0 } }
 private func initServerArgs() {
     let args = CommandLine.arguments.slice(1...) ?? []
     if args.contains(where: { $0 == "-h" || $0 == "--help" }) {
@@ -73,7 +74,7 @@ private func initServerArgs() {
             case "--version", "-v":
                 exit(EXIT_CODE_ZERO, out: "\(aeroSpaceAppVersion) \(gitHash)")
             case "--read-only": // todo rename to '--disabled' and unite with disabled feature
-                unsafe _serverArgs.isReadOnly = true
+                _serverArgs.withLock { $0.isReadOnly = true }
             case "-NSDocumentRevisionsDebugMode" where isDebug:
                 // Skip Xcode CLI args.
                 // Usually it's '-NSDocumentRevisionsDebugMode NO'/'-NSDocumentRevisionsDebugMode YES'
