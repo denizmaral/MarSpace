@@ -78,14 +78,19 @@ final class MacApp: AbstractApp {
         let wip = AwaitableOneTimeBroadcastLatch()
         wipPids[pid] = wip
 
-        let thread = Thread {
+        // The thread keeps its closure while the app runs: a weak reference, or the session would never be logged (see
+        // SessionAxCost). The session waits for the subscriptions below
+        let axCost = AxStats.session
+        let thread = Thread { [weak axCost] in
             $axTaskLocalAppThreadToken.withValue(AxAppThreadToken(pid: pid, idForDebug: idForDebug)) {
                 let axApp = AXUIElementCreateApplication(pid)
                 let handlers: HandlerToNotifKeyMapping = unsafe [
                     (refreshObs, [kAXWindowCreatedNotification, kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification]),
                 ]
                 let job = RunLoopJob(.cancellable)
-                let subscriptions = (try? unsafe AxSubscription.bulkSubscribe(pid, axApp, job, handlers)) ?? []
+                let subscriptions = AxStats.$session.withValue(axCost) {
+                    (try? unsafe AxSubscription.bulkSubscribe(pid, axApp, job, handlers)) ?? []
+                }
                 let isGood = !subscriptions.isEmpty
                 let app = isGood ? MacApp(running, bundleId: bundleId, axApp, subscriptions, Thread.current) : nil
 
@@ -137,7 +142,7 @@ final class MacApp: AbstractApp {
         guard let nativeWindowId = windowIdMapping.forward[windowId] else { return }
         _ = withWindowAsync(windowId, .cancellable) { [windows] window, job in
             guard let closeButton = window.get(Ax.closeButtonAttr) else { return }
-            if AXUIElementPerformAction(closeButton.cast, kAXPressAction as CFString) == .success {
+            if closeButton.cast.perform(kAXPressAction) {
                 windows.threadGuarded.removeValue(forKey: nativeWindowId)
             }
         }
@@ -174,7 +179,7 @@ final class MacApp: AbstractApp {
             MacApp.focusJob = withWindowAsync(windowId, .cancellable) { [nsApp] window, job in
                 // Raise firstly to make sure that by the time we activate the app, the window would be already on top
                 window.set(Ax.isMainAttr, true)
-                AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+                window.perform(kAXRaiseAction)
                 nsApp.activate(options: []) // .activateIgnoringOtherApps has no effect since macOS 14
             }
         }

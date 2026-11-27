@@ -16,6 +16,7 @@ final class AxSubscription {
 
     private func subscribe(_ key: String) throws -> Bool {
         axThreadToken.checkEquals(axTaskLocalAppThreadToken)
+        AxStats.record(.observer)
         if AXObserverAddNotification(obs, ax, key as CFString, nil) == .success {
             notifKeys.insert(key)
             return true
@@ -51,6 +52,7 @@ final class AxSubscription {
         axThreadToken.checkEquals(axTaskLocalAppThreadToken)
         CFRunLoopRemoveSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(obs), .defaultMode)
         for notifKey in notifKeys {
+            AxStats.record(.observer)
             AXObserverRemoveNotification(obs, ax, notifKey as CFString)
         }
     }
