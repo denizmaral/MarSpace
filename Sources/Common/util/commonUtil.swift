@@ -166,7 +166,7 @@ extension URL {
 }
 
 public func eprint(_ msg: String) {
-    FileHandle.standardError.write(Data((msg + "\n").utf8))
+    try? FileHandle.standardError.write(contentsOf: Data((msg + "\n").utf8)) // Like fputs: a closed stderr isn't an error
 }
 
 public func exit(_ exitCode: Int32, out: String? = nil, err: String? = nil) -> Never {
