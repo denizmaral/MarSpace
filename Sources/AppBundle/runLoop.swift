@@ -59,6 +59,7 @@ private final class RunLoopAction: NSObject, Sendable {
             AxStats.$session.withValue(axCost) {
                 _action(job)
             }
+            axCost?.jobDidFinish()
         }
     }
 }
