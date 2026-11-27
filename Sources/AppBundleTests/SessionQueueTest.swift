@@ -232,4 +232,27 @@ struct SessionQueueTest {
         try await until { log.entries.count == 2 }
         #expect(log.entries == ["light ends", "heavy ax(a)"])
     }
+
+    /// Canceled right after it got the queue, before it resumed: it gives the queue back without running
+    @Test func testASessionCanceledWhenItGetsTheQueueDoesntRun() async throws {
+        let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { _, _ in }
+        let gate = Gate(), log = Log()
+        var granted: Task<(), any Error>? = nil
+        let holder = Task.startUnstructured { @MainActor in
+            _ = try? await queue.exclusively(.light, "holder") {
+                await gate.wait()
+                granted?.cancel() // Its cancellation comes after the queue is handed over to it, right below
+            }
+        }
+        try await until { queue.waitingCount == 0 }
+        granted = Task.startUnstructured { @MainActor () throws in try await queue.exclusively(.light, "granted") { log.append("granted runs") } }
+        let next = Task.startUnstructured { @MainActor in _ = try? await queue.exclusively(.light, "next") { log.append("next") } }
+        try await until { queue.waitingCount == 2 }
+        gate.open()
+        await holder.value
+        let result = try #require(await granted?.result)
+        if case .failure(let error) = result { #expect(error is CancellationError) } else { Issue.record("It ran") }
+        await next.value
+        #expect(log.entries == ["next"])
+    }
 }

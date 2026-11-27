@@ -128,7 +128,9 @@ final class WindowDrag {
         self.window = window
         if isUnitTest { return } // The tests move the mouse with update(pointer:at:)
         let generation = generation
-        poll = Task.startUnstructured { @MainActor in
+        // Not a part of the session that began the drag, which may still hold the queue of the sessions when the drop
+        // comes: the session of the drop waits for it (see SessionQueue)
+        poll = SessionQueue.$holderId.withValue(nil) { Task.startUnstructured { @MainActor in
             while self.generation == generation { // The singleton
                 guard isLeftMouseButtonDown else {
                     // The release wasn't seen (the global monitor doesn't see it over MarSpace's own windows)
@@ -138,7 +140,7 @@ final class WindowDrag {
                 self.update(pointer: mouseLocation, at: .now)
                 try await Task.sleep(for: Self.pollInterval)
             }
-        }
+        } }
     }
 
     /// Where the mouse is now: the preview shows the drop there
