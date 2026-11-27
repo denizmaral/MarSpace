@@ -91,7 +91,7 @@ struct AwayPlacesCharacterizationTest {
 
     /// Pinned, a window that remembers its tile on one workspace floats on another one: the tree of the first one holds its
     /// place
-    @Test func testTheTileOfAWindowOnAnotherWorkspace() async throws {
+    @Test func testTheTileOfAWindowOnAnotherWorkspace() async {
         config.enableNormalizationFlattenContainers = true
         config.enableNormalizationOppositeOrientationForNestedContainers = true
         let a = Workspace.get(byName: "a")

@@ -35,9 +35,13 @@ extension Workspace {
     ///
     /// - Parameter windowId: the id of a window in the snapshot. A window without one is left out
     /// - Returns: nil if the workspace has no tiling windows
+    /// - Parameter comingBack: the floating windows that can come back to a tile of the workspace, see
+    ///   ``floatingWindowsComingBack()``. nil: they are found here
     @MainActor
-    func tilingTreeSnapshot<WindowId>(windowId: (Window) -> WindowId?) -> TilingTreeSnapshot<WindowId>? {
-        let away = AwayWindowPlaces(of: self, windowId)
+    func tilingTreeSnapshot<WindowId>(windowId: (Window) -> WindowId?, comingBack: [Window]? = nil) -> TilingTreeSnapshot<WindowId>? {
+        let comingBack = comingBack ?? Workspace.all.flatMap(\.floatingWindowsIfAny)
+            .filter { $0.tilingSlotWorkspaces.contains { $0 === self } }
+        let away = AwayWindowPlaces(of: self, windowId, comingBack)
         guard var root = rootTilingContainer.snapshot(windowId, away) else { return nil }
         if let rewrap = away.rootRewrap {
             let wrapper = TilingTreeSnapshot<WindowId>.Node.container(.init(
@@ -141,6 +145,20 @@ extension Workspace {
     }
 }
 
+extension Workspace {
+    /// The floating windows that remember their tiles, by the workspaces where they can come back to them (see
+    /// ``Window/tilingSlotWorkspaces``), in the order of the workspaces and of their floating windows: once for the
+    /// snapshots of all workspaces, not once per workspace
+    @MainActor
+    static func floatingWindowsComingBack() -> [ObjectIdentifier: [Window]] {
+        var result: [ObjectIdentifier: [Window]] = [:]
+        for window in all.flatMap(\.floatingWindowsIfAny) {
+            for workspace in window.tilingSlotWorkspaces { result[ObjectIdentifier(workspace), default: []].append(window) }
+        }
+        return result
+    }
+}
+
 /// The places in the tiling tree of a workspace where its floating windows come back to (see
 /// ``Window/tilingSlotReturn(on:)``), as nodes of the snapshot
 @MainActor
@@ -167,8 +185,10 @@ private struct AwayWindowPlaces<WindowId: Hashable & Sendable> {
     private(set) var wrappers: [ObjectIdentifier: Wrapper] = [:]
     private(set) var rootRewrap: RootRewrap? = nil
 
-    init(of workspace: Workspace, _ windowId: (Window) -> WindowId?) {
-        for window in Workspace.all.flatMap(\.floatingWindowsIfAny) where window.tilingSlot != nil {
+    /// - Parameter comingBack: the floating windows that can come back to a tile of the workspace (the others have no place
+    ///   there), in the order of the workspaces and of their floating windows
+    init(of workspace: Workspace, _ windowId: (Window) -> WindowId?, _ comingBack: [Window]) {
+        for window in comingBack {
             guard let id = windowId(window), let place = window.tilingSlotReturn(on: workspace) else { continue }
             switch place {
                 case .child(let parent, let index, let weight):

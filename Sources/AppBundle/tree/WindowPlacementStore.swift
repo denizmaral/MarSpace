@@ -305,19 +305,21 @@ enum WindowPlacementStore {
         if isUnitTest { return }
         var placements: [WindowPlacement] = []
         placements.reserveCapacity(MacWindow.allWindowsMap.count)
-        for window in MacWindow.allWindowsMap.values {
-            guard let nativeWindowId = window.macApp.nativeWindowId(of: window.windowId),
-                  let workspace = window.nodeWorkspace?.name
-            else { continue }
-            placements.append(WindowPlacement(
-                nativeWindowId: nativeWindowId,
-                pid: window.macApp.pid,
-                workspace: workspace,
-                isFloating: window.isFloating,
-                isPinned: window.isPinned,
-                isFloatedByWorkspaceLayout: window.isFloatedByWorkspaceLayout,
-                poppedOutOfTile: window.isPoppedOut ? window.poppedOut == .tile : nil,
-            ))
+        // The windows of each workspace: not a walk up to the workspace from every window. The windows that aren't on a
+        // workspace (minimized, popups) have no placement
+        for workspace in Workspace.all {
+            for case let window as MacWindow in workspace.allLeafWindowsRecursive where MacWindow.allWindowsMap[window.windowId] === window {
+                guard let nativeWindowId = window.macApp.nativeWindowId(of: window.windowId) else { continue }
+                placements.append(WindowPlacement(
+                    nativeWindowId: nativeWindowId,
+                    pid: window.macApp.pid,
+                    workspace: workspace.name,
+                    isFloating: window.isFloating,
+                    isPinned: window.isPinned,
+                    isFloatedByWorkspaceLayout: window.isFloatedByWorkspaceLayout,
+                    poppedOutOfTile: window.isPoppedOut ? window.poppedOut == .tile : nil,
+                ))
+            }
         }
         // E.g. the lock screen: all windows are temporarily invisible. Keep the last persisted placement
         if placements.isEmpty { return }
@@ -335,9 +337,13 @@ enum WindowPlacementStore {
         placements.sort { $0.nativeWindowId < $1.nativeWindowId }
         // While a window is resized with the mouse, every mouse move changes the weights: the trees are persisted when
         // the button is released (a refresh session follows)
-        let trees = currentlyManipulatedWithMouseWindowId == nil
-            ? Workspace.all.compactMap { $0.tilingTreeSnapshot(windowId: nativeWindowId(of:)) }
-            : lastPersistedTrees
+        let trees: [PersistedTilingTree]
+        if currentlyManipulatedWithMouseWindowId == nil {
+            let comingBack = Workspace.floatingWindowsComingBack()
+            trees = Workspace.all.compactMap { $0.tilingTreeSnapshot(windowId: nativeWindowId(of:), comingBack: comingBack[ObjectIdentifier($0)] ?? []) }
+        } else {
+            trees = lastPersistedTrees
+        }
         let layouts = workspaceLayoutRecords()
         if placements == lastPersisted && trees == lastPersistedTrees && layouts == lastPersistedLayouts { return }
         lastPersisted = placements

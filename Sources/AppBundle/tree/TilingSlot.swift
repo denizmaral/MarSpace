@@ -172,6 +172,7 @@ extension Window {
     /// after a restart then
     @MainActor
     func tilingSlotReturn(on workspace: Workspace) -> TilingSlotReturn? {
+        // See tilingSlotWorkspaces: the same conditions, in the same order
         guard let slot = tilingSlot, slot.workspaceLayout == workspace.workspaceLayout else { return nil }
         let others = allAwayWindows(of: workspace).filter { $0 !== self }
         if let parent = slot.parent, parent.parent == nil,
@@ -483,12 +484,12 @@ private func bindBackEmptiedContainer(_ container: TilingContainer, on workspace
 @MainActor
 private func restoredWeight(_ weight: CGFloat, siblings: [WeightedSibling], in parent: TilingContainer) -> CGFloat {
     let orientation = parent.orientation
-    let away = awayNodes(of: parent)
+    let away = Set(awayNodes(of: parent).map { ObjectIdentifier($0.node) })
     return restoredWeight(
         weight,
         siblings: siblings,
         children: parent.inhabitedChildren.map { ($0, $0.getWeight(orientation)) },
-        isAway: { node in away.contains { $0.node === node } },
+        isAway: { node in node.map { away.contains(ObjectIdentifier($0)) } ?? false },
     )
 }
 
@@ -503,10 +504,11 @@ private func restoredWeight(
     // The first child that comes back: its weight is the scale for the others that are away
     guard !children.isEmpty else { return weight }
     let total = children.reduce(0) { $0 + max($1.weight, 0) }
+    let childrenByNode = Dictionary(children.map { (ObjectIdentifier($0.node), $0) }, uniquingKeysWith: { first, _ in first })
     var before: CGFloat = 0 // The siblings that had a share when the node left (the old scale)
     var broughtBack: CGFloat = 0 // The children that were away then and came back with their own share (the new scale)
     for sibling in siblings {
-        let child = sibling.node.flatMap { node in children.first { $0.node === node } }
+        let child = sibling.node.flatMap { childrenByNode[ObjectIdentifier($0)] }
         if sibling.isAway {
             if let child { broughtBack += max(child.weight, 0) }
         } else if child != nil || !isAway(sibling.node) {
@@ -517,6 +519,17 @@ private func restoredWeight(
     // The node was the only child with a share, or all children now came back with their own shares: an equal share
     guard weight > 0, before > 0, now > total * 1e-9 else { return total / CGFloat(children.count) }
     return weight * now / before
+}
+
+extension Window {
+    /// The workspaces where the window can come back to its tile: of the parent of its slot, and of its neighbor.
+    /// ``tilingSlotReturn(on:)`` is nil on every other workspace (both of its ways back need one of them there)
+    @MainActor
+    var tilingSlotWorkspaces: [Workspace] {
+        guard let slot = tilingSlot else { return [] }
+        let parent = slot.parent?.nodeWorkspace, neighbor = slot.neighbor?.nodeWorkspace
+        return [parent, neighbor === parent ? nil : neighbor].compactMap { $0 }
+    }
 }
 
 /// The windows of the workspace that are away (in a macOS native state, or made floating by the user) and have a place in
@@ -536,12 +549,14 @@ private func allAwayWindows(of workspace: Workspace) -> [Window] {
 private func awayNodes(of parent: TilingContainer) -> [AwayNode] {
     guard let workspace = parent.nodeWorkspace else { return [] }
     var result: [AwayNode] = []
+    var nodes: Set<ObjectIdentifier> = [] // Of `result`
     for window in allAwayWindows(of: workspace) {
         guard let slot = window.tilingSlot else { continue }
         if slot.parent === parent {
             result.append(AwayNode(node: window, siblings: slot.siblings, index: slot.index))
+            nodes.insert(ObjectIdentifier(window))
         }
-        if let record = slot.emptiedContainer, record.parent === parent, !result.contains(where: { $0.node === record.container }) {
+        if let record = slot.emptiedContainer, record.parent === parent, nodes.insert(ObjectIdentifier(record.container)).inserted {
             result.append(AwayNode(node: record.container, siblings: record.siblings, index: record.index))
         }
     }
@@ -576,7 +591,16 @@ private func siblingsIncludingAwayNodes(_ parent: TilingContainer) -> [WeightedS
 /// Right after the last of the siblings on the left (`siblings[..<index]`) that is in `nodes`. 0 if none of them is
 @MainActor
 private func insertionIndex(in nodes: [TreeNode], siblings: [WeightedSibling], index: Int) -> Int {
-    func position(_ node: TreeNode?) -> Int? { node.flatMap { node in nodes.firstIndex { $0 === node } } }
+    // Looked up, not searched: the first position of each node, as `firstIndex` finds it
+    let positions = Dictionary(zip(nodes.map(ObjectIdentifier.init), nodes.indices), uniquingKeysWith: { first, _ in first })
+    func position(_ node: TreeNode?) -> Int? { node.flatMap { positions[ObjectIdentifier($0)] } }
+    let siblingNodes = Set(siblings.compactMap { $0.node.map(ObjectIdentifier.init) })
+    // The positions of the siblings around a replacement, for "not out of order": the last position of the siblings
+    // before `i` (`lastBefore[i]`, -1 if none of them is in `nodes`) and the first of the siblings from `index` on
+    let siblingPositions = siblings.map { position($0.node) }
+    var lastBefore: [Int] = [-1]
+    for i in 0 ..< index { lastBefore.append(max(lastBefore[i], siblingPositions[i] ?? -1)) }
+    let firstFromIndex = siblingPositions[index...].lazy.map { $0 ?? Int.max }.min() ?? Int.max
     for i in (0 ..< index).reversed() {
         let sibling = siblings[i]
         if let position = position(sibling.node) { return position + 1 }
@@ -585,13 +609,10 @@ private func insertionIndex(in nodes: [TreeNode], siblings: [WeightedSibling], i
         // sibling (the user moved it there), and not out of order with the siblings around (the user moved them)
         let candidates = [sibling.node].compactMap { $0 } + sibling.windows.compactMap(\.window)
         let replacement = candidates.lazy
-            .compactMap { candidate in candidate.parentsWithSelf.first(where: { ancestor in nodes.contains { $0 === ancestor } }) }
-            .filter { child in !siblings.contains { $0.node === child } }
+            .compactMap { candidate in candidate.parentsWithSelf.first(where: { positions[ObjectIdentifier($0)] != nil }) }
+            .filter { !siblingNodes.contains(ObjectIdentifier($0)) }
             .compactMap(position)
-            .filter { replacement in
-                siblings[..<i].allSatisfy { (position($0.node) ?? -1) < replacement } &&
-                    siblings[index...].allSatisfy { (position($0.node) ?? Int.max) > replacement }
-            }
+            .filter { lastBefore[i] < $0 && firstFromIndex > $0 }
             .max()
         if let replacement { return replacement + 1 }
     }
