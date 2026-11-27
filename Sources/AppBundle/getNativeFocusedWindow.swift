@@ -12,7 +12,7 @@ private var focusedApp: (any AbstractApp)? {
         } else {
             check(appForTests == nil)
             return switch RunningApps.frontmost {
-                case let frontmost?: try await MacApp.getOrRegister(frontmost)
+                case let frontmost?: try await MacApp.registerWithinDeadline(frontmost)
                 case nil: nil
             }
         }

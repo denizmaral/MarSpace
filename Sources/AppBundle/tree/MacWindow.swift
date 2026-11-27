@@ -139,9 +139,20 @@ final class MacWindow: Window {
 
     override func getTitle(_ cm: CancellationMode) async throws -> String { try await macApp.getAxTitle(windowId, cm) ?? "" }
 
+    /// The native state that the window is in for MarSpace: the container that it's in. What `getMacosWindowNativeState`
+    /// answers while the app doesn't, so that nothing changes until it does
+    @MainActor
+    var nativeStateAsKnown: MacosWindowNativeState {
+        switch parent {
+            case is MacosFullscreenWindowsContainer: .nativeFullscreen
+            case is MacosMinimizedWindowsContainer: .nativeMinimized
+            default: .normal
+        }
+    }
+
     override func isMacosFullscreen(_ cm: CancellationMode) async throws -> Bool { try await macApp.isMacosNativeFullscreen(windowId, cm) == true }
     override func isMacosMinimized(_ cm: CancellationMode) async throws -> Bool { try await macApp.isMacosNativeMinimized(windowId, cm) == true }
-    override func getMacosWindowNativeState(_ cm: CancellationMode) async throws -> MacosWindowNativeState {
+    @MainActor override func getMacosWindowNativeState(_ cm: CancellationMode) async throws -> MacosWindowNativeState {
         try await macApp.getMacosWindowNativeState(windowId, cm) ?? .normal
     }
 
@@ -233,7 +244,7 @@ final class MacWindow: Window {
         prevUnhiddenProportionalPositionInsideWorkspaceRect != nil
     }
 
-    override func getAxSize(_ cm: CancellationMode) async throws -> CGSize? {
+    @MainActor override func getAxSize(_ cm: CancellationMode) async throws -> CGSize? {
         try await macApp.getAxSize(windowId, cm)
     }
 
@@ -241,7 +252,7 @@ final class MacWindow: Window {
         macApp.setAxFrame(windowId, topLeft, size, readBack: readBack)
     }
 
-    override func getAxRect(_ cm: CancellationMode) async throws -> Rect? {
+    @MainActor override func getAxRect(_ cm: CancellationMode) async throws -> Rect? {
         try await macApp.getAxRect(windowId, cm)
     }
 }
