@@ -8,6 +8,9 @@ final class AppAnswers {
     let deadline: Duration
     /// The app missed the deadline and hasn't answered since: it isn't asked, and isn't waited for
     private(set) var isDegraded = false
+    /// Counts the recoveries: a request that was asked before the app answered again and misses its deadline after it
+    /// doesn't degrade the app again (it doesn't rely on the order in which the main actor runs the two)
+    private var recoveries = 0
     private let appName: () -> String
     /// Sent once when the app misses the deadline: tells when the app answers again, with ``didAnswerAgain()``
     private let probe: () -> Void
@@ -32,10 +35,11 @@ final class AppAnswers {
     ) async throws -> T {
         if isDegraded { return fallback() }
         if cm == .nonCancellable || isStartup { return try await request() }
+        let recoveriesBefore = recoveries
         switch try await withDeadline(deadline, request) {
             case .answered(let value): return value
             case .deadlinePassed:
-                didMissDeadline()
+                if recoveries == recoveriesBefore { didMissDeadline() }
                 return fallback()
         }
     }
@@ -52,6 +56,7 @@ final class AppAnswers {
     func didAnswerAgain() {
         guard isDegraded else { return }
         isDegraded = false
+        recoveries += 1
         perfLogger.info("\(self.appName(), privacy: .public) answers again")
         didRecover()
     }
