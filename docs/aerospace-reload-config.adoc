@@ -2,7 +2,7 @@
 include::util/man-attributes.adoc[]
 :manname: aerospace-reload-config
 // tag::purpose[]
-:manpurpose: Reload currently active config
+:manpurpose: Reload the settings
 // end::purpose[]
 
 // =========================================================== Synopsis
