@@ -234,14 +234,15 @@ enum TrackpadColumnScrolling {
     }
 
     /// After every layout: which monitors show a scrolling workspace. The tap is enabled only while one does, the scroll
-    /// events of the other workspaces don't go through MarSpace. Nothing is taken while MarSpace is disabled, or while a
-    /// window in macOS fullscreen has the focus (its own Space is shown: a column that got the focus would leave it)
+    /// events of the other workspaces don't go through MarSpace. Nothing is taken while MarSpace is disabled, or on a
+    /// monitor that shows the Space of a window in macOS fullscreen (see ``MonitorSpace``: a column that got the focus
+    /// would leave it)
     @MainActor
     static func update() {
         guard let port = unsafe tap else { return }
-        let isFullscreenShown = globalFocus.windowOrNil?.parent is MacosFullscreenWindowsContainer
-        let workspaces = config.trackpadScrollsColumns && TrayMenuModel.shared.isEnabled && !isFullscreenShown
-            ? globalUnsortedMonitorInfos.map(\.visibleWorkspace).filter { $0.rootTilingContainer.layout == .scrolling }
+        let workspaces = config.trackpadScrollsColumns && TrayMenuModel.shared.isEnabled
+            ? globalUnsortedMonitorInfos.filter { $0.space == .desktop }.map(\.visibleWorkspace)
+                .filter { $0.rootTilingContainer.layout == .scrolling }
             : []
         let screens = workspaces.map(\.workspaceMonitorInfo.rect)
         let excluded = workspaces.flatMap { $0.floatingWindows.compactMap(\.observedFrame) }
