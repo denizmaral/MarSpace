@@ -643,11 +643,20 @@ struct StripEntry {
 /// A workspace that is gone (an empty workspace that was left) stays where it was, until it has shrunk away
 func stripEntries(from fromListed: [WorkspaceViewModel], to toListed: [WorkspaceViewModel]) -> [StripEntry] {
     let fromByName = Dictionary(fromListed.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
-    // Where each name is in the strip before, in order: a favorite that is listed twice is there twice
+    // Where each name is in the strip before, in order: a favorite that is listed twice is there twice. `fromIndex` only
+    // grows: the cursor of a name only moves on, past the indices before it, so each index is passed once
     let fromIndices = Dictionary(grouping: fromListed.indices, by: { fromListed[$0].name })
     let toNames = Set(toListed.map(\.name))
     var result: [StripEntry] = []
     var fromIndex = 0
+    var cursors: [String: Int] = [:]
+    func nextIndex(of name: String) -> Int? {
+        guard let indices = fromIndices[name] else { return nil }
+        var cursor = cursors[name, default: 0]
+        while cursor < indices.count, indices[cursor] < fromIndex { cursor += 1 }
+        cursors[name] = cursor
+        return cursor < indices.count ? indices[cursor] : nil
+    }
     func appendGone(until end: Int) {
         while fromIndex < end {
             let workspace = fromListed[fromIndex]
@@ -656,7 +665,7 @@ func stripEntries(from fromListed: [WorkspaceViewModel], to toListed: [Workspace
         }
     }
     for workspace in toListed {
-        if let index = fromIndices[workspace.name]?.first(where: { $0 >= fromIndex }) {
+        if let index = nextIndex(of: workspace.name) {
             appendGone(until: index)
             fromIndex = index + 1
         }
