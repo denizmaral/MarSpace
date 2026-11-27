@@ -7,6 +7,8 @@ final class FloatingWindowsContainer: TreeNode, NonLeafTreeNodeObject {
 final class WorkspacesContainer: TreeNode, NonLeafTreeNodeObject {
     var visibleWorkspaceNameOrStale: String? = nil
     var prevVisibleWorkspaceName: String? = nil
+    /// What the monitor showed when the focus left it, see ``MonitorInfo/space``
+    var spaceWhenTheFocusLeft: MonitorSpace = .desktop
     @MainActor init(parent: Monitor) { super.init(parent: parent, adaptiveWeight: 1, index: INDEX_BIND_LAST) }
 }
 

@@ -68,6 +68,11 @@ private struct FrozenFocus: AeroAny, Equatable, Sendable {
         oldFocus.windowOrNil?.markAsMostRecentChild()
     }
 
+    let oldMonitor = oldFocus.workspace.workspaceMonitorInfo
+    if oldMonitor.rect.topLeftCorner != newFocus.workspace.workspaceMonitorInfo.rect.topLeftCorner {
+        // It shows what the focus showed there, see MonitorInfo.space
+        oldMonitor.toMonitorOrRearrangeMonitors().getWorkspacesContainerOrCreate().spaceWhenTheFocusLeft = MonitorSpace(of: oldFocus)
+    }
     _focus = newFocus.frozen
     let status = newFocus.workspace.workspaceMonitorInfo.setVisibleWorkspace(newFocus.workspace)
 
@@ -171,7 +176,6 @@ extension Workspace {
     }
     _lastKnownFocus = frozenFocus
     wasLastKnownFocusInMacosFullscreen = focus.windowOrNil?.parent is MacosFullscreenWindowsContainer
-    updateMacosFullscreenSpaces() // Also the focus that the mouse moved (the sessions of focus-follows-mouse)
 
     if onFocusChangedRecursionGuard { return }
     onFocusChangedRecursionGuard = true

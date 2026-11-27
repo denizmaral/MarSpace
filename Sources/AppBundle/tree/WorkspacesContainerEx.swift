@@ -7,6 +7,7 @@ extension WorkspacesContainer {
         if visibleWorkspaceNameOrStale == workspace.name { return true }
         prevVisibleWorkspaceName = visibleWorkspaceNameOrStale
         visibleWorkspaceNameOrStale = workspace.name
+        spaceWhenTheFocusLeft = .desktop // MarSpace shows a workspace: the desktop is shown
         return true
     }
 
