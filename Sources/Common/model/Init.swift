@@ -2,16 +2,16 @@ import Synchronization
 
 /// What runs: the unit tests until the binary says otherwise, at its start (`main` of the CLI, `initAppBundle` of the
 /// server)
-public enum ProcessRole: UInt8, AtomicRepresentable, Sendable {
+public enum ProcessRole: Sendable {
     case unitTests
     case cli
     case server
 }
 
-private let _processRole = Atomic<ProcessRole>(.unitTests)
+private let _processRole = Mutex(ProcessRole.unitTests)
 public var processRole: ProcessRole {
-    get { _processRole.load(ordering: .relaxed) }
-    set { _processRole.store(newValue, ordering: .relaxed) }
+    get { _processRole.withLock { $0 } }
+    set { _processRole.withLock { $0 = newValue } }
 }
 
 /// The unit tests too: they show messages on the command line

@@ -67,11 +67,11 @@ private final class RunLoopAction: NSObject, Sendable {
 
 final class RunLoopJob: Sendable, AeroAny {
     /// Set by the task that waits for the job, read on the thread of the app
-    private let _isCancelled = Atomic<Bool>(false)
-    var isCancelled: Bool { _isCancelled.load(ordering: .acquiring) }
+    private let _isCancelled = Mutex(false)
+    var isCancelled: Bool { _isCancelled.withLock { $0 } }
     func cancel() {
         if cm == .nonCancellable { return }
-        _isCancelled.store(true, ordering: .releasing)
+        _isCancelled.withLock { $0 = true }
     }
 
     let cm: CancellationMode
