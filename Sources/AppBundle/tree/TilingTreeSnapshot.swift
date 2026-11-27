@@ -95,14 +95,7 @@ extension Workspace {
         }
 
         previousRoot.unbindFromParent() // A workspace has one root. The windows that aren't restored are still in it
-        let root = TilingContainer(parent: self, adaptiveWeight: 1, snapshot.root.orientation, snapshot.root.layout, index: INDEX_BIND_LAST)
-        var restored: Set<WindowId> = []
-        var returning: [ReturningWindow] = []
-        root.restoreChildren(of: snapshot.root, known, away, &restored, &returning)
-        // In the order of the tree: the windows that left the same container before know where they come back
-        for window in returning {
-            window.window.leaveTilingTreeRememberingSlot(for: window.floatingContainer, ownState: window.ownState)
-        }
+        let restored = bindRoot(of: snapshot, tiles: known, away: away)
         for window in mostRecentElsewhere { window.markAsMostRecentChild() }
         snapshot.mostRecentWindow.flatMap { known[$0] }?.markAsMostRecentChild()
         // Opened while MarSpace wasn't running: next to the window that was the most recent one, like any new window
@@ -110,9 +103,7 @@ extension Workspace {
             window.bindAsNewTilingWindow(to: self)
         }
     }
-}
 
-extension Workspace {
     /// The closed windows cache puts the windows back where they were (see
     /// ``restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow:)``): the tiles of the snapshot wherever they are now, into a
     /// new root. The floating windows that remember their places in the tree get the places of the snapshot: the places
@@ -128,13 +119,25 @@ extension Workspace {
         for window in Workspace.all.flatMap(\.floatingWindowsIfAny) where !window.isFloatedByWorkspaceLayout {
             away[window.windowId] = window
         }
+        bindRoot(of: snapshot, tiles: tiles, away: away)
+    }
+
+    /// Binds a new root with the windows of `snapshot`: `tiles` at their places, and the floating windows of `away` that
+    /// have a place there remember it (they stay floating, see ``TilingTreeSnapshot/Node/away(id:weight:)``)
+    ///
+    /// - Returns: the ids of the windows that have their places in the new root
+    @MainActor
+    @discardableResult
+    private func bindRoot<WindowId>(of snapshot: TilingTreeSnapshot<WindowId>, tiles: [WindowId: Window], away: [WindowId: Window]) -> Set<WindowId> {
         let root = TilingContainer(parent: self, adaptiveWeight: 1, snapshot.root.orientation, snapshot.root.layout, index: INDEX_BIND_LAST)
-        var restored: Set<OpaqueWindowId> = []
+        var restored: Set<WindowId> = []
         var returning: [ReturningWindow] = []
         root.restoreChildren(of: snapshot.root, tiles, away, &restored, &returning)
-        for window in returning { // In the order of the tree, see restoreTilingTree
+        // In the order of the tree: the windows that left the same container before know where they come back
+        for window in returning {
             window.window.leaveTilingTreeRememberingSlot(for: window.floatingContainer, ownState: window.ownState)
         }
+        return restored
     }
 }
 
