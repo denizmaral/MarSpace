@@ -32,6 +32,9 @@ struct TilingSlot {
     /// The window was the last child of its parent: the normalization removes the empty container. The first of its
     /// windows that comes back binds it back
     fileprivate var emptiedContainer: EmptiedContainer?
+    /// The layout of the workspace when the window left. The place is in the tree of that layout: a window that left a
+    /// tiling workspace that scrolls now is a column there, next to the column of its neighbor (it split that column)
+    fileprivate let workspaceLayout: WorkspaceLayout?
 
     fileprivate var leftSiblings: ArraySlice<WeightedSibling> { siblings[..<index] }
 }
@@ -142,10 +145,24 @@ extension Window {
     func bindBackToTilingSlot(on workspace: Workspace) -> Bool {
         guard let slot = tilingSlot else { return false }
         tilingSlot = nil
+        // The place is in the tree of another layout
+        guard slot.workspaceLayout == workspace.workspaceLayout else { return bindAsColumn(nextTo: slot, on: workspace) }
         if let parent = slot.parent, parent.parent == nil {
             bindBackEmptiedContainer(parent, on: workspace, ownRecord: slot.emptiedContainer)
         }
         return bindToParent(of: slot, on: workspace) || bindNextToNeighbor(of: slot, on: workspace)
+    }
+
+    /// The workspace scrolls since the window left its tile: a column, next to the column of its neighbor (on the same side)
+    @MainActor
+    private func bindAsColumn(nextTo slot: TilingSlot, on workspace: Workspace) -> Bool {
+        let root = workspace.rootTilingContainer
+        guard workspace.workspaceLayout == .scrolling, let neighbor = slot.neighbor, neighbor.nodeWorkspace === workspace,
+              let column = neighbor.parentsWithSelf.first(where: { $0.parent === root }),
+              let index = column.ownIndex(in: .all)
+        else { return false }
+        bind(to: root, adaptiveWeight: 1, index: index + (slot.isAfterNeighbor ? 1 : 0)) // A column is as long as the others
+        return true
     }
 
     /// Where the floating window would come back to in the tiling tree of `workspace` if it was made a tile now (see
@@ -155,7 +172,7 @@ extension Window {
     /// after a restart then
     @MainActor
     func tilingSlotReturn(on workspace: Workspace) -> TilingSlotReturn? {
-        guard let slot = tilingSlot else { return nil }
+        guard let slot = tilingSlot, slot.workspaceLayout == workspace.workspaceLayout else { return nil }
         let others = allAwayWindows(of: workspace).filter { $0 !== self }
         if let parent = slot.parent, parent.parent == nil,
            slot.emptiedContainer?.container === parent || others.contains(where: { $0.tilingSlot?.emptiedContainer?.container === parent })
@@ -296,6 +313,7 @@ extension Window {
                 isRootFlattened: false,
                 neighborAdaptiveWeight: slot.adaptiveWeight,
                 emptiedContainer: awaySlot.emptiedContainer,
+                workspaceLayout: slot.workspaceLayout,
             )
             return true
         } else if let (node, awaySlot) = tilingNeighbor(ofAwayNeighborsOf: slot, isTiling) {
@@ -379,6 +397,7 @@ extension TilingSlot {
             isRootFlattened: parent.isRootContainer && parent.layout != .scrolling && parent.children.count == 1 && neighbor is TilingContainer,
             neighborAdaptiveWeight: neighbor?.getWeight(parent.orientation) ?? WEIGHT_AUTO,
             emptiedContainer: emptiedContainer,
+            workspaceLayout: parent.nodeWorkspace?.workspaceLayout,
         )
     }
 

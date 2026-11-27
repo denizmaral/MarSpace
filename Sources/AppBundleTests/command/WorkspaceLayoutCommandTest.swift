@@ -153,8 +153,8 @@ struct WorkspaceLayoutCommandTest {
         away.isMacosFullscreenForTest = false
         try await normalizeLayoutReason()
         session(workspace)
-        // Next to its neighbor, below it like in the tiles: a column with window 2
-        assertEquals(workspace.rootTilingContainer.layoutDescription, .h_scrolling([.window(1), .v_tiles([.window(2), .window(3)])]))
+        // A column next to the column of its neighbor, after it like in the tiles
+        assertEquals(workspace.rootTilingContainer.layoutDescription, .h_scrolling([.window(1), .window(2), .window(3)]))
 
         // Back while the workspace floats: it floats, and it's a tile again when the workspace tiles
         away.isMacosFullscreenForTest = true
