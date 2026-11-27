@@ -123,7 +123,7 @@ extension Workspace {
     @MainActor
     func restoreFrozenTilingTree(_ snapshot: TilingTreeSnapshot<OpaqueWindowId>, _ windows: [OpaqueWindowId: Window]) {
         var tiles: [OpaqueWindowId: Window] = [:]
-        for id in snapshot.root.tileIds { tiles[id] = windows[id] ?? Window.get(byId: id) }
+        for id in snapshot.root.windowIds(areAway: false) { tiles[id] = windows[id] ?? Window.get(byId: id) }
         var away: [OpaqueWindowId: Window] = [:]
         for window in Workspace.all.flatMap(\.floatingWindowsIfAny) where !window.isFloatedByWorkspaceLayout {
             away[window.windowId] = window
@@ -268,13 +268,13 @@ extension TilingTreeSnapshot.Container {
         }
     }
 
-    /// The windows that are tiles in the snapshot, not the floating windows that remember their places
-    fileprivate var tileIds: [WindowId] {
+    /// The windows of the snapshot: the tiles, or the floating windows that remember their places
+    func windowIds(areAway: Bool) -> [WindowId] {
         children.flatMap { child -> [WindowId] in
             switch child {
-                case .window(let id, _): [id]
-                case .away: []
-                case .container(let container): container.tileIds
+                case .window(let id, _): areAway ? [] : [id]
+                case .away(let id, _): areAway ? [id] : []
+                case .container(let container): container.windowIds(areAway: areAway)
             }
         }
     }

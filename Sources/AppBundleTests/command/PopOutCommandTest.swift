@@ -348,4 +348,64 @@ struct PopOutCommandTest {
         Workspace.movePinnedWindowsToVisibleWorkspaces()
         assertEquals(window.nodeWorkspace?.name, "C")
     }
+
+    /// Popped out while the workspace tiled, back in while it scrolls: a column next to the column of its neighbor. Its
+    /// tile is in the tree of the tiling layout, it split the column of its neighbor
+    @Test func testItIsAColumnOfAWorkspaceThatScrollsNow() async {
+        config.enableNormalizationFlattenContainers = true
+        config.enableNormalizationOppositeOrientationForNestedContainers = true
+        let workspace = Workspace.get(byName: name)
+        var window: TestWindow!
+        workspace.rootTilingContainer.apply {
+            TestWindow.new(id: 1, parent: $0)
+            TilingContainer.newVTiles(parent: $0, adaptiveWeight: 1).apply {
+                window = TestWindow.new(id: 2, parent: $0)
+                TestWindow.new(id: 3, parent: $0)
+            }
+        }
+        #expect(window.focusWindow())
+        await run("pop-out")
+        workspace.normalizeContainers()
+        await run("workspace-layout scrolling")
+
+        #expect(window.focusWindow())
+        await run("pop-out")
+        workspace.normalizeContainers()
+        assertEquals(workspace.rootTilingContainer.layoutDescription, .h_scrolling([.window(1), .window(2), .window(3)]))
+    }
+
+    /// Popped out and back in while the workspace scrolls: its column
+    @Test func testItGoesBackToItsColumn() async {
+        let workspace = Workspace.get(byName: name)
+        let window = TestWindow.new(id: 1, parent: workspace.rootTilingContainer)
+        TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
+        TestWindow.new(id: 3, parent: workspace.rootTilingContainer)
+        #expect(window.focusWindow())
+        await run("workspace-layout scrolling")
+        await run("pop-out")
+        await run("pop-out")
+        assertEquals(workspace.rootTilingContainer.layoutDescription, .h_scrolling([.window(1), .window(2), .window(3)]))
+    }
+
+    /// The tree persisted across restarts holds the place of the popped out window only in the layout that it left
+    @Test func testThePersistedTreeHoldsThePlaceOnlyInItsLayout() async {
+        config.enableNormalizationFlattenContainers = true
+        config.enableNormalizationOppositeOrientationForNestedContainers = true
+        let workspace = Workspace.get(byName: name)
+        var window: TestWindow!
+        workspace.rootTilingContainer.apply {
+            TestWindow.new(id: 1, parent: $0)
+            TilingContainer.newVTiles(parent: $0, adaptiveWeight: 1).apply {
+                window = TestWindow.new(id: 2, parent: $0)
+                TestWindow.new(id: 3, parent: $0)
+            }
+        }
+        #expect(window.focusWindow())
+        await run("pop-out")
+        workspace.normalizeContainers()
+        #expect(workspace.tilingTreeSnapshot(windowId: \.windowId)?.root.windowIds(areAway: true) == [2])
+
+        await run("workspace-layout scrolling")
+        #expect(workspace.tilingTreeSnapshot(windowId: \.windowId)?.root.windowIds(areAway: true) == [])
+    }
 }
