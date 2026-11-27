@@ -54,12 +54,12 @@ private final class RunLoopAction: NSObject, Sendable {
         axCost = AxStats.session
     }
     @objc func action() {
+        defer { axCost?.jobDidFinish() } // Also a canceled job: it waited behind the jobs before it (a busy app)
         if autoCheckCancelled && job.isCancelled { return }
         $refreshSessionEvent.withValue(_refreshSessionEvent) {
             AxStats.$session.withValue(axCost) {
                 _action(job)
             }
-            axCost?.jobDidFinish()
         }
     }
 }
