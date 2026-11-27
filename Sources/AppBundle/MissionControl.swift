@@ -23,6 +23,7 @@ enum MissionControl {
         else { return }
         let dockAx = AXUIElementCreateApplication(dock.processIdentifier)
         for notification in notifications {
+            AxStats.record(.observer)
             _ = AXObserverAddNotification(newObserver, dockAx, notification as CFString, nil)
         }
         if let observer {

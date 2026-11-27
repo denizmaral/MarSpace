@@ -18,12 +18,14 @@ func dumpAxRecursive(_ ax: AXUIElement, _ kind: AxKind, recursionDepth: Int = 0)
             ignored.append(key)
         } else {
             var raw: AnyObject?
+            AxStats.record(.read)
             if let status = .some(unsafe AXUIElementCopyAttributeValue(ax, key as CFString, &raw)), status != .success {
                 failedAxRequest.append("get.\(key)(\(status.repr))")
             }
             result[key] = prettyValue(raw as Any?, recursionDepth: recursionDepth)
 
             var isWritable: DarwinBoolean = false
+            AxStats.record(.read)
             if let status = .some(unsafe AXUIElementIsAttributeSettable(ax, key as CFString, &isWritable)), status != .success {
                 failedAxRequest.append("isWritable.\(key)(\(status.repr))")
             }
@@ -74,6 +76,7 @@ private func prettyValue(_ value: Any?, recursionDepth: Int) -> Json {
 extension AXUIElement {
     fileprivate func attrs(failedAxRequest: inout [String]) -> [String] {
         var rawArray: CFArray?
+        AxStats.record(.read)
         if let status = .some(unsafe AXUIElementCopyAttributeNames(self, &rawArray)), status != .success {
             failedAxRequest.append("AXUIElementCopyAttributeNames(\(status.repr))")
         }

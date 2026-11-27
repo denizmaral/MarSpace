@@ -310,6 +310,7 @@ private enum AxElementUnderMouse {
 private nonisolated func axWindowUnderMouse(_ location: CGPoint) async -> AxElementUnderMouse {
     let systemwide = AXUIElementCreateSystemWide()
     var element: AXUIElement?
+    AxStats.record(.read)
     guard unsafe AXUIElementCopyElementAtPosition(systemwide, Float(location.x), Float(location.y), &element) == .success,
           let element
     else { return topmostWindow(at: location).map { .window(nativeWindowId: $0.id, pid: $0.pid) } ?? .unknown }

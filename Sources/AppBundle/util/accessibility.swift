@@ -357,7 +357,7 @@ extension AXUIElement: AxUiElementMock {
     func get<Attr: ReadableAttr>(_ attr: Attr) -> Attr.T? {
         let state = signposter.beginInterval(#function, "attr: \(attr.key) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
         defer { signposter.endInterval(#function, state) }
-        AxStats.recordRead()
+        AxStats.record(.read)
         var raw: AnyObject?
         return unsafe AXUIElementCopyAttributeValue(self, attr.key as CFString, &raw) == .success
             ? raw.flatMap(attr.getter)
@@ -369,18 +369,26 @@ extension AXUIElement: AxUiElementMock {
         let state = signposter.beginInterval(#function, "attr: \(attr.key) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
         defer { signposter.endInterval(#function, state) }
         guard let value = attr.setter(value) else { return false }
-        AxStats.recordWrite()
+        AxStats.record(.write)
         return AXUIElementSetAttributeValue(self, attr.key as CFString, value) == .success
     }
 
     func containingNativeWindowId() -> CGWindowID? {
         let state = signposter.beginInterval(#function, "axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
         defer { signposter.endInterval(#function, state) }
-        AxStats.recordRead()
+        AxStats.record(.read)
         var cgWindowId = CGWindowID()
         return unsafe _AXUIElementGetWindow(self, &cgWindowId) == .success && cgWindowId != kCGNullWindowID
             ? cgWindowId
             : nil
+    }
+
+    /// - Parameter action: e.g. `kAXRaiseAction`
+    @discardableResult func perform(_ action: String) -> Bool {
+        let state = signposter.beginInterval(#function, "action: \(action) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
+        defer { signposter.endInterval(#function, state) }
+        AxStats.record(.action)
+        return AXUIElementPerformAction(self, action as CFString) == .success
     }
 
     var pid: pid_t? {

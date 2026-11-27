@@ -26,7 +26,9 @@ func scheduleCancellableCompleteRefreshSession(
     }
     if !isStartupSessionOver { return }
     activeRefreshTask?.cancel()
-    activeRefreshTask = Task.startUnstructured { @MainActor in
+    // The session that asked for it is over: the complete refresh session counts its own accessibility calls, and the
+    // task doesn't keep the cost of the asking session (it's logged when its jobs are done, see SessionAxCost)
+    activeRefreshTask = AxStats.$session.withValue(nil) { Task.startUnstructured { @MainActor in
         // Coalesce bursts of events (e.g. AX moved/resized notifications during window animations). A newer event
         // cancels this task while it sleeps, before it makes any accessibility calls. One frame of latency
         try await Task.sleep(for: .milliseconds(16))
@@ -36,7 +38,7 @@ func scheduleCancellableCompleteRefreshSession(
             assumeCancellable: true,
             optimisticallyPreLayoutWorkspaces: optimisticallyPreLayoutWorkspaces,
         )
-    }
+    } }
 }
 
 @MainActor
@@ -50,10 +52,10 @@ func runHeavyCompleteRefreshSession(
     defer { signposter.endInterval(#function, state) }
     defer { if event.isStartup { isStartupSessionOver = true } }
     if !TrayMenuModel.shared.isEnabled { return }
-    let perf = SessionPerfLog("heavy \(event)")
-    defer { perf.finish() }
+    let axCost = SessionAxCost("heavy \(event)")
+    defer { axCost.sessionDidFinish() }
     let res = await Result {
-        try await $refreshSessionEvent.withValue(event) {
+        try await $refreshSessionEvent.withValue(event) { try await AxStats.$session.withValue(axCost) {
             let nativeFocused = try await getNativeFocusedWindow(.cancellable)
             if let nativeFocused { try await debugWindowsIfRecording(nativeFocused, .cancellable) }
             updateFocusCache(nativeFocused)
@@ -76,7 +78,7 @@ func runHeavyCompleteRefreshSession(
             if shouldLayoutWorkspaces { try await layoutWorkspaces() }
             FocusBorderController.shared.update()
             WindowPlacementStore.persistIfChanged()
-        }
+        } }
     }
     switch res {
         case .success(()): break
@@ -102,9 +104,9 @@ func runLightSession<T>(
         activeRefreshTask?.cancel() // Give priority to runSession
         activeRefreshTask = nil
     }
-    let perf = SessionPerfLog(readOnly ? "query \(event)" : "light \(event)")
-    defer { perf.finish() }
-    return try await $refreshSessionEvent.withValue(event) {
+    let axCost = SessionAxCost(readOnly ? "query \(event)" : "light \(event)")
+    defer { axCost.sessionDidFinish() }
+    return try await $refreshSessionEvent.withValue(event) { try await AxStats.$session.withValue(axCost) {
         let nativeFocused = try await getNativeFocusedWindow(.cancellable)
         if let nativeFocused { try await debugWindowsIfRecording(nativeFocused, .cancellable) }
         updateFocusCache(nativeFocused)
@@ -131,7 +133,7 @@ func runLightSession<T>(
         WindowPlacementStore.persistIfChanged()
         if !event.isFocusFollowsMouse { scheduleCancellableCompleteRefreshSession(event) }
         return result
-    }
+    } }
 }
 
 enum RunSessionGuard: Sendable {

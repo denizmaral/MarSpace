@@ -44,16 +44,21 @@ private final class RunLoopAction: NSObject, Sendable {
     let job: RunLoopJob
     private let autoCheckCancelled: Bool
     private let _refreshSessionEvent: RefreshSessionEvent?
+    /// Kept until the job is done: the session is logged afterwards (see `SessionAxCost`)
+    private let axCost: SessionAxCost?
     init(job: RunLoopJob, autoCheckCancelled: Bool, _ action: @escaping @Sendable (RunLoopJob) -> ()) {
         self.job = job
         self.autoCheckCancelled = autoCheckCancelled
         _action = action
         _refreshSessionEvent = refreshSessionEvent
+        axCost = AxStats.session
     }
     @objc func action() {
         if autoCheckCancelled && job.isCancelled { return }
         $refreshSessionEvent.withValue(_refreshSessionEvent) {
-            _action(job)
+            AxStats.$session.withValue(axCost) {
+                _action(job)
+            }
         }
     }
 }
