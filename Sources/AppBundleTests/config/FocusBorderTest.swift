@@ -53,6 +53,8 @@ struct FocusBorderTest {
         let border = StackedWindow(number: 9, pid: 1, layer: 0)
         #expect(isPanelRightNext(to: [border], pid: app, panel: panel))
         #expect(isPanelRightNext(to: [StackedWindow(number: 5, pid: app, layer: 0), border], pid: app, panel: panel)) // A helper window of the app
+        // Another window of the app: the border was under it
+        #expect(!isPanelRightNext(to: [StackedWindow(number: 5, pid: app, layer: 0), border], pid: app, windowsOfTheApp: [5], panel: panel))
         #expect(!isPanelRightNext(to: [StackedWindow(number: 6, pid: other, layer: 0), border], pid: app, panel: panel)) // It would cover the border
         #expect(isPanelRightNext(to: [StackedWindow(number: 7, pid: other, layer: 20), border], pid: app, panel: panel)) // The Dock doesn't count
         #expect(!isPanelRightNext(to: [StackedWindow(number: 6, pid: other, layer: 0)], pid: app, panel: panel))
