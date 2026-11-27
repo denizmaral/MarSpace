@@ -1,12 +1,29 @@
-nonisolated(unsafe) public var _isCli = true
-var isCli: Bool { unsafe _isCli }
-var isServer: Bool { unsafe !_isCli }
+import Synchronization
 
-nonisolated(unsafe) public var _isUnitTest: Bool = true
-public var isUnitTest: Bool { unsafe _isUnitTest }
+/// What runs: the unit tests until the binary says otherwise, at its start (`main` of the CLI, `initAppBundle` of the
+/// server)
+public enum ProcessRole: UInt8, AtomicRepresentable, Sendable {
+    case unitTests
+    case cli
+    case server
+}
 
-nonisolated(unsafe) public var _terminationHandler: TerminationHandler? = nil
-public var terminationHandler: TerminationHandler? { unsafe _terminationHandler }
+private let _processRole = Atomic<ProcessRole>(.unitTests)
+public var processRole: ProcessRole {
+    get { _processRole.load(ordering: .relaxed) }
+    set { _processRole.store(newValue, ordering: .relaxed) }
+}
+
+/// The unit tests too: they show messages on the command line
+var isCli: Bool { processRole != .server }
+var isServer: Bool { processRole == .server }
+public var isUnitTest: Bool { processRole == .unitTests }
+
+private let _terminationHandler = Mutex<(any TerminationHandler)?>(nil)
+public var terminationHandler: (any TerminationHandler)? {
+    get { _terminationHandler.withLock { $0 } }
+    set { _terminationHandler.withLock { $0 = newValue } }
+}
 
 public protocol TerminationHandler: Sendable {
     @MainActor

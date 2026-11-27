@@ -84,7 +84,8 @@ private final class DropPreviewPanel: NSPanel {
         let lineWidth = CGFloat(max(border.width, 3))
         let outlineRect = bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
         let radius = max(0, min(CGFloat(border.radius), outlineRect.width / 2, outlineRect.height / 2))
-        let path = unsafe CGPath(roundedRect: outlineRect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        let path = CGMutablePath()
+        path.addRoundedRect(in: outlineRect, cornerWidth: radius, cornerHeight: radius)
         let scale = screen?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         for layer in [fill, fillMask, outline, outlineMask, badge, symbol] { layer.contentsScale = scale }
         for layer in [fill, fillMask, outline, outlineMask] { layer.frame = bounds }

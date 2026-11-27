@@ -11,8 +11,7 @@ extension NWConnection {
     /// Queues the message (its length, then its JSON) and returns. Messages are sent in the order of the calls
     public func sendAtomic(_ msg: Codable, _ encoder: JSONEncoder = JSONEncoder(), completion: @escaping @Sendable (NWError?) -> Void) {
         let payload = Result { try encoder.encode(msg) }.getOrDie()
-        var data = withUnsafeBytes(of: UInt32(payload.count)) { pointer in unsafe Data.init(pointer) }
-        check(data.count == 4)
+        var data = UInt32(payload.count).socketBytes
         data.append(payload)
         send(content: data, completion: .contentProcessed(completion))
     }
@@ -95,14 +94,11 @@ extension NWConnection {
     }
 
     public func readUInt32() async -> Result<UInt32, NWError> {
-        await read(bytes: 4).map { data in
-            unsafe data.withUnsafeBytes { pointer in unsafe pointer.load(as: UInt32.self) }
-        }
+        await read(bytes: 4).map(UInt32.init(socketBytes:))
     }
 
     public func writeUInt32(_ int: UInt32) async -> ((), error: NWError?) {
-        let data = withUnsafeBytes(of: int) { pointer in unsafe Data.init(pointer) }
-        check(data.count == 4)
+        let data = int.socketBytes
         return await withCheckedContinuation { cont in
             send(content: data, completion: .contentProcessed { error in cont.resume(returning: ((), error)) })
         }
@@ -115,6 +111,17 @@ extension NWConnection {
             case .failure(let e):
                 return .failure(e)
         }
+    }
+}
+
+extension UInt32 {
+    /// Its 4 bytes on the socket, the least significant first: the byte order of the Macs that the client and the server
+    /// run on (arm64 and x86_64)
+    var socketBytes: Data { Data((0 ..< 4).map { UInt8(truncatingIfNeeded: self >> ($0 * 8)) }) }
+
+    init(socketBytes bytes: Data) {
+        check(bytes.count == 4)
+        self = bytes.reversed().reduce(0) { $0 << 8 | UInt32($1) }
     }
 }
 

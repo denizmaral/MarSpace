@@ -20,7 +20,7 @@ func interceptTermination(_ _signal: Int32) {
 
 @MainActor
 func initTerminationHandler() {
-    unsafe _terminationHandler = AppServerTerminationHandler()
+    terminationHandler = AppServerTerminationHandler()
     // `kill`, e.g. by a script that restarts MarSpace: quit like the menu does (the default action of SIGTERM ends the
     // process right away, with the windows of the workspaces that aren't shown still in the corner of the screen)
     signal(SIGTERM, SIG_IGN)
