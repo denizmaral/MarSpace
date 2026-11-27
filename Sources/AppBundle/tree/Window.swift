@@ -88,7 +88,10 @@ open class Window: TreeNode, Hashable {
         {
             tilingSlot = nil
         }
-        if newParent is TilingContainer { isPinned = false } // Tiled: it has its place in the layout of one workspace
+        if newParent is TilingContainer { // Tiled: it has its place in the layout of one workspace
+            isPinned = false
+            poppedOut = nil
+        }
         return super.bind(to: newParent, adaptiveWeight: adaptiveWeight, index: index)
     }
 
@@ -329,12 +332,30 @@ extension Window {
     func asMacWindow() -> MacWindow { self as! MacWindow }
 }
 
+/// What a floating window is on its own account: pinned, popped out. A binding as a tile ends it (see
+/// ``Window/bind(to:adaptiveWeight:index:)``): a window that is a tile only for a moment gets it back (the focus commands
+/// see the floating windows as tiles, a restore of a tree puts them at their places in it)
+struct FloatingOwnState {
+    fileprivate let isPinned: Bool
+    fileprivate let poppedOut: PoppedOutOrigin?
+}
+
+extension Window {
+    var floatingOwnState: FloatingOwnState {
+        get { FloatingOwnState(isPinned: isPinned, poppedOut: poppedOut) }
+        set {
+            isPinned = newValue.isPinned
+            poppedOut = newValue.poppedOut
+        }
+    }
+}
+
 extension Window {
     /// What a change of the tree and a layout can change of the window besides its node (see `tryOut`)
     struct PlaceState {
         fileprivate let isFullscreen: Bool
         fileprivate let isParkedOffTheScreen: Bool
-        fileprivate let isPinned: Bool
+        fileprivate let floatingOwnState: FloatingOwnState
         fileprivate let dwindleSplitAnchor: TreeNode?
         fileprivate let tilingSlot: TilingSlot?
     }
@@ -343,7 +364,7 @@ extension Window {
         PlaceState(
             isFullscreen: isFullscreen,
             isParkedOffTheScreen: isParkedOffTheScreen,
-            isPinned: isPinned,
+            floatingOwnState: floatingOwnState,
             dwindleSplitAnchor: dwindleSplitAnchor,
             tilingSlot: tilingSlot,
         )
@@ -352,7 +373,7 @@ extension Window {
     func restore(_ state: PlaceState) {
         isFullscreen = state.isFullscreen
         isParkedOffTheScreen = state.isParkedOffTheScreen
-        isPinned = state.isPinned
+        floatingOwnState = state.floatingOwnState
         dwindleSplitAnchor = state.dwindleSplitAnchor
         tilingSlot = state.tilingSlot
     }

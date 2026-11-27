@@ -207,14 +207,14 @@ extension Window {
     }
 
     /// The window that `restoreTilingTree` put back at its place in the tree goes back to `container`, its floating
-    /// container: it remembers the place (it was lost with a restart of MarSpace), and stays pinned if it was
+    /// container: it remembers the place (it was lost with a restart of MarSpace), and stays pinned or popped out
     @MainActor
-    func leaveTilingTreeRememberingSlot(for container: FloatingWindowsContainer, isPinned: Bool) {
+    func leaveTilingTreeRememberingSlot(for container: FloatingWindowsContainer, ownState: FloatingOwnState) {
         guard case .tilingContainer(let parent) = windowParentCases else { return }
         let siblings = siblingsIncludingAwayNodes(parent)
         let previous = bind(to: container, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST).orDie()
         tilingSlot = TilingSlot(leaving: self, parent, previous, siblings)
-        self.isPinned = isPinned // Ended by the binding as a tile
+        floatingOwnState = ownState // Ended by the binding as a tile
     }
 
     /// The container of the window that is away in a macOS native state, and the weight that the window would get there

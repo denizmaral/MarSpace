@@ -10,12 +10,13 @@ enum PoppedOutOrigin: Equatable, Sendable {
 }
 
 extension Window {
-    /// Popped out, and still floating and pinned: `layout tiling` or `pin off` ended it
+    /// Popped out, and still floating: a binding as a tile ended it (`layout tiling`)
     @MainActor
-    var isPoppedOut: Bool { poppedOut != nil && isPinned && parent is FloatingWindowsContainer }
+    var isPoppedOut: Bool { poppedOut != nil && parent is FloatingWindowsContainer }
 
-    /// Floating, pinned, in the middle of its monitor (Omarchy's "pop window out"): where it was the last time it was
-    /// popped out, otherwise 1300 by 900 points, at most nine tenths of the screen
+    /// Floating in the middle of its monitor, on its workspace (Omarchy's "pop window out", which pins the window too: the
+    /// owner didn't want it on every workspace): where it was the last time it was popped out, otherwise 1300 by 900
+    /// points, at most nine tenths of the screen
     @MainActor
     func popOut(on workspace: Workspace) {
         if parent is TilingContainer {
@@ -24,8 +25,7 @@ extension Window {
         } else {
             poppedOut = .floating(observedFrame)
         }
-        stopFloatingByWorkspaceLayout() // It floats on its own account, and comes along to other workspaces
-        isPinned = true
+        stopFloatingByWorkspaceLayout() // It floats on its own account
         isFullscreen = false
         let screen = workspace.workspaceMonitorInfo.visibleRect
         if let frame = lastPoppedOutFrame, screen.contains(frame.center), frame.width <= screen.width, frame.height <= screen.height {
@@ -48,7 +48,7 @@ extension Window {
     func popIn(on workspace: Workspace) async throws {
         let origin = poppedOut
         poppedOut = nil
-        isPinned = false
+        isPinned = false // Back in the layout of its workspace. Earlier versions pinned popped out windows
         if let frame = floatingFrameToApply ?? observedFrame { lastPoppedOutFrame = frame }
         floatingFrameToApply = nil
         switch origin {

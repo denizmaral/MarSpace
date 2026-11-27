@@ -523,7 +523,7 @@ extension Action {
             case .pin(.on): "Pin the floating window: on every workspace"
             case .pin(.off): "Unpin the window"
             case .popOut(.toggle): "Pop the window out or back in"
-            case .popOut(.on): "Pop the window out: floating, on every workspace"
+            case .popOut(.on): "Pop the window out: floating in the middle of the screen"
             case .popOut(.off): "Pop the window back into its tile"
             case .tileFloatingWindows: "Tile all floating windows"
             case .flattenWorkspaceTree: "Reset the layout"

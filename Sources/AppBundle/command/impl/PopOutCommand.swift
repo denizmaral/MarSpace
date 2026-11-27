@@ -9,7 +9,7 @@ struct PopOutCommand: Command {
     func run(_ env: CmdEnv, _ io: CmdIo) async -> BinaryExitCode {
         guard let target = args.resolveTargetOrReportError(env, io) else { return .fail }
         guard let window = target.windowOrNil else { return .fail(io.err(noWindowIsFocused)) }
-        if !window.isPoppedOut { window.poppedOut = nil } // Tiled or unpinned meanwhile: what it was is outdated
+        if !window.isPoppedOut { window.poppedOut = nil } // Tiled meanwhile: what it was is outdated
         let popsOut = switch args.toggle {
             case .on: true
             case .off: false

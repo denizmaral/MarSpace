@@ -45,16 +45,14 @@ struct FrozenWindow {
     let id: OpaqueWindowId
     /// The window when the world was frozen. Another one with the same id was registered again
     private weak var window: Window?
-    private let isPinned: Bool
-    private let poppedOut: PoppedOutOrigin?
+    private let ownState: FloatingOwnState
     private let lastPoppedOutFrame: Rect?
     private let isFloatedByWorkspaceLayout: Bool
 
     @MainActor init(_ window: Window) {
         id = window.windowId
         self.window = window
-        isPinned = window.isPinned
-        poppedOut = window.poppedOut
+        ownState = window.floatingOwnState
         lastPoppedOutFrame = window.lastPoppedOutFrame
         isFloatedByWorkspaceLayout = window.isFloatedByWorkspaceLayout
     }
@@ -63,8 +61,7 @@ struct FrozenWindow {
     @MainActor func restoredWindow() -> Window? {
         guard let window = Window.get(byId: id) else { return nil }
         if window !== self.window { // Registered again: it knows nothing
-            window.isPinned = isPinned
-            window.poppedOut = poppedOut
+            window.floatingOwnState = ownState
             window.lastPoppedOutFrame = lastPoppedOutFrame
             window.isFloatedByWorkspaceLayout = isFloatedByWorkspaceLayout
         }
