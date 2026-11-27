@@ -63,12 +63,14 @@ enum AxStats {
 let perfLogger = Logger(subsystem: aeroSpaceAppId, category: "perf")
 
 /// The accessibility calls and the duration of one refresh session. Logged when the session is over and every job that it
-/// sent to the threads of the apps is done: the jobs keep it. `ms` is the session, `jobsMs` until its last job was done
-/// (a busy app answers late), `outsideOfSessions` the calls outside of sessions since MarSpace started
+/// sent to the threads of the apps is done: the jobs keep it (so do the tasks that the session starts, e.g. of the focus
+/// border: the log can come later). `ms` is the session, `jobsMs` until its last job was done (a busy app answers late),
+/// `outsideOfSessions` the calls outside of sessions since MarSpace started
 final class SessionAxCost: Sendable {
     private struct State {
         var counters = AxStats.Counters()
         var duration: Duration? = nil
+        var jobsDuration: Duration? = nil
     }
 
     private let name: String
@@ -81,6 +83,12 @@ final class SessionAxCost: Sendable {
 
     func record(_ call: AxStats.Call) { state.withLock { $0.counters.record(call) } }
 
+    /// A job of the session on the thread of an app is done
+    func jobDidFinish() {
+        let duration = ContinuousClock.now - start
+        state.withLock { $0.jobsDuration = max($0.jobsDuration ?? duration, duration) }
+    }
+
     /// The session is over, its jobs may still be under way
     func sessionDidFinish() {
         let duration = ContinuousClock.now - start
@@ -88,8 +96,9 @@ final class SessionAxCost: Sendable {
     }
 
     deinit {
-        let jobsDuration = ContinuousClock.now - start
-        let (ax, duration) = state.withLock { ($0.counters, $0.duration ?? jobsDuration) }
+        let now = ContinuousClock.now - start
+        let (ax, duration, jobs) = state.withLock { ($0.counters, $0.duration ?? now, $0.jobsDuration) }
+        let jobsDuration = max(duration, jobs ?? duration)
         let outside = AxStats.callsOutsideOfSessions.total
         perfLogger.debug(
             "session=\(self.name, privacy: .public) axReads=\(ax.reads) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds) outsideOfSessions=\(outside)",

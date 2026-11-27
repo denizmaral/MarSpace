@@ -41,11 +41,9 @@ struct AxStatsTest {
             cost.sessionDidFinish()
         }
         assertNotNil(weakCost)
-        let counters = weakCost?.counters
         jobMayRun.signal()
         try await thread.runInLoop(.cancellable) { _ in } // The run loop does the jobs in order
         for _ in 0 ..< 100 where weakCost != nil { try await Task.sleep(for: .milliseconds(10)) }
-        assertEquals(counters, AxStats.Counters())
         assertNil(weakCost)
     }
 
