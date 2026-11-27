@@ -30,12 +30,19 @@ extension Workspace {
     /// A pinned window is on the workspace that its monitor shows, whichever it is (Hyprland's `pin`): when another
     /// workspace is shown, the pinned windows of the previous one go there, before the layout hides the rest of it.
     /// They don't take the focus of the workspace that they come to
+    ///
+    /// Not while the monitor shows the Space of a window in macOS fullscreen (see ``MacosFullscreenSpaces``): its
+    /// desktop isn't shown, the pinned windows stay there with their workspace. They came along to the workspace of Zen in
+    /// macOS fullscreen, the focus came back to a popped out window there, and the desktop showed that workspace (it
+    /// floats: the window popped back in as a floating window, not into its tile)
     @MainActor
     static func movePinnedWindowsToVisibleWorkspaces() {
+        updateMacosFullscreenSpaces()
         for workspace in Workspace.all where !workspace.isVisible {
             let pinned = workspace.floatingWindows.filter(\.isPinned)
             if pinned.isEmpty { continue }
             let visible = workspace.workspaceMonitorInfo.visibleWorkspace
+            if macosFullscreenSpaces.isShown(visible.name) { continue }
             let mostRecent = visible.mostRecentWindowRecursive
             for window in pinned {
                 // The user didn't move it: it keeps its place in the tree of its workspace (a popped out window goes back

@@ -123,7 +123,8 @@ container that holds its center.
 
 A floating window can be **pinned** (the action "Pin the floating window", or `aerospace pin`): it stays on the screen
 when you go to another workspace, like a small video or a note that you want everywhere. It comes along without taking
-the focus. A window rule can pin the windows of an app: make them floating first (Change the layout › Floating), then
+the focus. A window in macOS fullscreen has a Space of its own: a pinned window doesn't come along to it, it stays on
+its workspace on the desktop. A window rule can pin the windows of an app: make them floating first (Change the layout › Floating), then
 pin them.
 
 **Pop the window out** (the action "Pop the window out", `aerospace pop-out`, Omarchy's Super + O): the window floats
