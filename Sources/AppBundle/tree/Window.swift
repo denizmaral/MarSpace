@@ -248,6 +248,7 @@ open class Window: TreeNode, Hashable {
         let assumed = size(inTile: asked)
         let wasBiggerThanTile = isBiggerThanTile
         remember(SizeAnswer(asked: asked, got: got))
+        if isFirstAnswer { logAnswerThatReachesIntoTheGaps(asked: asked, got: got) }
         let answered = size(inTile: asked)
         guard lastAppliedLayoutPhysicalRect?.size == asked, answered != assumed else { return }
         guard Self.centering(of: answered, inTile: asked) != Self.centering(of: assumed, inTile: asked) ||
@@ -262,6 +263,20 @@ open class Window: TreeNode, Hashable {
             layoutRequestsAfterReadBack = (inARow + 1, now)
         }
         scheduleCancellableCompleteRefreshSession(.frameReadBack)
+    }
+
+    /// A window that is bigger than its tile by more than half a gap is centered over the gaps (see
+    /// ``centering(of:inTile:)``): the gaps around it look different from the others. Logged, with what it was asked
+    /// for: a Terminal window took a row more than its tile (785 for 777.5), while the same request from outside MarSpace
+    /// got 771. Not explained yet
+    @MainActor
+    private func logAnswerThatReachesIntoTheGaps(asked: CGSize, got: CGSize) {
+        let gaps = config.gaps.inner
+        func reachesIntoTheGaps(_ excess: CGFloat, gap: Int) -> Bool { excess > CGFloat(gap) / 2 && excess <= CGFloat(gap) }
+        guard reachesIntoTheGaps(got.width - asked.width, gap: gaps.horizontal) || reachesIntoTheGaps(got.height - asked.height, gap: gaps.vertical)
+        else { return }
+        let tile = lastAppliedLayoutPhysicalRect.map { "\($0.topLeftX),\($0.topLeftY) \($0.width)x\($0.height)" } ?? "none"
+        layoutLogger.info("window \(self.windowId, privacy: .public) of \(self.app.name ?? "?", privacy: .public) asked \(asked.debugDescription, privacy: .public) got \(got.debugDescription, privacy: .public) on tile \(tile, privacy: .public): it reaches into the gaps")
     }
 
     /// - Parameter frame: read from the window just now

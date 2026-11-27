@@ -61,6 +61,8 @@ enum AxStats {
 }
 
 let perfLogger = Logger(subsystem: aeroSpaceAppId, category: "perf")
+/// What the windows make of the sizes of their tiles, see Window.askAgainIfTheAnswerIsOff
+let layoutLogger = Logger(subsystem: aeroSpaceAppId, category: "layout")
 
 /// The accessibility calls and the duration of one refresh session. Logged when the session is over and every job that it
 /// sent to the threads of the apps is done: the jobs keep it (so do the tasks that the session starts, e.g. of the focus
