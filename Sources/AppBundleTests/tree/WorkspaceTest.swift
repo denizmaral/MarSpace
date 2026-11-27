@@ -1,4 +1,5 @@
 @testable import AppBundle
+import Common
 import Testing
 
 @MainActor
@@ -29,5 +30,15 @@ struct WorkspaceTest {
         #expect(Workspace.get(byName: "a").focusWorkspace())
         updateTrayText()
         #expect(mainMonitorInfo.visibleWorkspace === globalFocus.workspace)
+    }
+
+    @Test func testAllIsSortedByNameWhateverTheOrderOfCreation() {
+        for (id, name) in zip([1, 2, 3, 4] as [OpaqueWindowId], ["b", "10", "a", "2"]) {
+            TestWindow.new(id: id, parent: Workspace.get(byName: name).rootTilingContainer)
+        }
+        _ = Workspace.get(byName: "c") // Empty: garbage
+        #expect(Workspace.all.map(\.name) == ["2", "10", "a", "b", "c", "setUpWorkspacesForTests"])
+        Workspace.garbageCollectUnusedWorkspaces()
+        #expect(Workspace.all.map(\.name) == ["2", "10", "a", "b", "setUpWorkspacesForTests"])
     }
 }
