@@ -238,14 +238,17 @@ struct SessionQueueTest {
         let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { _, _ in }
         let gate = Gate(), log = Log()
         var granted: Task<(), any Error>? = nil
+        var holderEntered = false
         let holder = Task.startUnstructured { @MainActor in
             _ = try? await queue.exclusively(.light, "holder") {
+                holderEntered = true
                 await gate.wait()
                 granted?.cancel() // Its cancellation comes after the queue is handed over to it, right below
             }
         }
-        try await until { queue.waitingCount == 0 }
+        try await until { holderEntered } // It holds the queue
         granted = Task.startUnstructured { @MainActor () throws in try await queue.exclusively(.light, "granted") { log.append("granted runs") } }
+        try await until { queue.waitingCount == 1 } // First in line
         let next = Task.startUnstructured { @MainActor in _ = try? await queue.exclusively(.light, "next") { log.append("next") } }
         try await until { queue.waitingCount == 2 }
         gate.open()
