@@ -65,6 +65,9 @@ final class FocusBorderController {
         let stacking = verified.map { .onScreen($0, isPanelInPlace: true) } ?? windowStacking(
             of: nativeWindowId,
             pid: window.macApp.pid,
+            windowsOfTheApp: Set(MacWindow.allWindows.lazy
+                .filter { $0.macApp === window.macApp && $0 !== window }
+                .compactMap { window.macApp.nativeWindowId(of: $0.windowId).map(Int.init) }),
             panel: panel.isVisible ? CGWindowID(exactly: panel.windowNumber) : nil,
             flashPanels: MoveFlash.shared.shownPanelNumbers.union(DropPreview.shared.shownPanelNumbers),
             windowFrame: CGRect(x: windowFrame.topLeftX, y: windowFrame.topLeftY, width: windowFrame.width, height: windowFrame.height),
@@ -215,6 +218,7 @@ private enum WindowStacking: Equatable {
 private func windowStacking(
     of nativeWindowId: UInt32,
     pid: pid_t,
+    windowsOfTheApp: Set<Int>,
     panel: CGWindowID?,
     flashPanels: Set<Int>,
     windowFrame: CGRect,
@@ -232,19 +236,28 @@ private func windowStacking(
         case .above: windowsAbove()
         case .below: infos[(index + 1)...].map(StackedWindow.init) // From the window down
     }
-    return .onScreen(placement, isPanelInPlace: isPanelRightNext(to: windowsNext, pid: pid, panel: panel, ignoring: flashPanels))
+    return .onScreen(placement, isPanelInPlace: isPanelRightNext(to: windowsNext, pid: pid, windowsOfTheApp: windowsOfTheApp, panel: panel, ignoring: flashPanels))
 }
 
 /// - Parameter windows: the windows next to the window on the side of the panel, nearest first
 /// - Parameter flashPanels: the panels of the move flash (see `MoveFlash`): next to a window for a moment, they don't cover
 ///   the border
+/// - Parameter windowsOfTheApp: the other windows of the window's app that MarSpace manages
 /// - Returns: the panel is the nearest of them, apart from the window's own app (an app may keep a helper window right
-///   next to its window). Only the normal layer counts (not the desktop, the menu bar or the Dock)
-func isPanelRightNext(to windows: [StackedWindow], pid: pid_t, panel: CGWindowID?, ignoring flashPanels: Set<Int> = []) -> Bool {
+///   next to its window). Not apart from the other windows of the app: the panel below one of them was below a Terminal
+///   window that was raised over it (a popped out window), the border was drawn over the other window and under it.
+///   Only the normal layer counts (not the desktop, the menu bar or the Dock)
+func isPanelRightNext(
+    to windows: [StackedWindow],
+    pid: pid_t,
+    windowsOfTheApp: Set<Int> = [],
+    panel: CGWindowID?,
+    ignoring flashPanels: Set<Int> = [],
+) -> Bool {
     guard let panel else { return false }
     for window in windows where window.layer == 0 && !(window.number.map(flashPanels.contains) ?? false) {
         if window.number == Int(panel) { return true }
-        if window.pid != pid { return false }
+        if window.pid != pid || window.number.map(windowsOfTheApp.contains) == true { return false }
     }
     return false
 }
