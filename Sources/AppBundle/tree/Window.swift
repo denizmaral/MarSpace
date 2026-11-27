@@ -276,7 +276,7 @@ open class Window: TreeNode, Hashable {
         guard reachesIntoTheGaps(got.width - asked.width, gap: gaps.horizontal) || reachesIntoTheGaps(got.height - asked.height, gap: gaps.vertical)
         else { return }
         let tile = lastAppliedLayoutPhysicalRect.map { "\($0.topLeftX),\($0.topLeftY) \($0.width)x\($0.height)" } ?? "none"
-        layoutLogger.info("window \(self.windowId, privacy: .public) of \(self.app.name ?? "?", privacy: .public) asked \(asked.debugDescription, privacy: .public) got \(got.debugDescription, privacy: .public) on tile \(tile, privacy: .public): it reaches into the gaps")
+        layoutLogger.notice("window \(self.windowId, privacy: .public) of \(self.app.name ?? "?", privacy: .public) asked \(asked.debugDescription, privacy: .public) got \(got.debugDescription, privacy: .public) on tile \(tile, privacy: .public): it reaches into the gaps")
     }
 
     /// - Parameter frame: read from the window just now
