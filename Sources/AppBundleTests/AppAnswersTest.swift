@@ -66,6 +66,51 @@ struct AppAnswersTest {
         #expect(events.probes == 0)
     }
 
+    /// The apps that launch with the login are slow: the startup session waits for them
+    @Test func testTheStartupSessionHasNoDeadline() async throws {
+        let thread = startRunLoopThread()
+        defer { stop(thread) }
+        let events = Events()
+        let answers = AppAnswers(deadline: .milliseconds(50), appName: { "test" }, probe: { events.probes += 1 }, didRecover: {})
+        let busy = DispatchSemaphore(value: 0)
+        thread.runInLoopAsync(job: RunLoopJob(.nonCancellable)) { _ in busy.wait() }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { busy.signal() }
+        let answer = try await $refreshSessionEvent.withValue(.startup) {
+            try await answers.answer(.cancellable, orElse: { -1 }) { try await thread.runInLoop(.cancellable) { _ -> Int in 1 } }
+        }
+        #expect(answer == 1)
+        #expect(!answers.isDegraded)
+        #expect(events.probes == 0)
+    }
+
+    /// A request that was asked before the app answered again, and missed its deadline after it, doesn't degrade the app
+    /// again
+    @Test func testAMissFromBeforeARecoveryDoesntDegradeAgain() async throws {
+        let thread = startRunLoopThread()
+        defer { stop(thread) }
+        let events = Events()
+        let answers = AppAnswers(deadline: .milliseconds(100), appName: { "test" }, probe: { events.probes += 1 }, didRecover: { events.recoveries += 1 })
+        let busy = DispatchSemaphore(value: 0)
+        thread.runInLoopAsync(job: RunLoopJob(.nonCancellable)) { _ in busy.wait() }
+        defer { busy.signal() }
+        let first = Task.startUnstructured { @MainActor () throws in
+            _ = try await answers.answer(.cancellable, orElse: { -1 }) { try await thread.runInLoop(.cancellable) { _ -> Int in 1 } }
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        // Asked before the app answers again, misses its deadline after it
+        let late = Task.startUnstructured { @MainActor () throws in
+            _ = try await answers.answer(.cancellable, orElse: { -1 }) { try await thread.runInLoop(.cancellable) { _ -> Int in 1 } }
+        }
+        try await first.value // Missed: degraded
+        #expect(answers.isDegraded)
+        answers.didAnswerAgain() // As if the probe got its answer
+        #expect(!answers.isDegraded)
+        try await late.value
+        #expect(!answers.isDegraded)
+        #expect(events.probes == 1)
+        #expect(events.recoveries == 1)
+    }
+
     private func startRunLoopThread() -> Thread {
         let thread = Thread {
             RunLoop.current.add(Port(), forMode: .default) // A run loop without a source returns right away
