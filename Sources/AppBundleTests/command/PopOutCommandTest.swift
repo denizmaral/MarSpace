@@ -41,7 +41,7 @@ struct PopOutCommandTest {
         workspace.normalizeContainers()
         try await workspace.layoutWorkspace()
         assertEquals(window.isFloating, true)
-        assertEquals(window.isPinned, true)
+        assertEquals(window.isPinned, false) // It stays on its workspace
         assertEquals(window.axRectForTest, popped)
 
         await run("pop-out")
@@ -71,8 +71,7 @@ struct PopOutCommandTest {
         await run("focus --window-id 1")
         await run("focus right")
         await run("focus --window-id 2")
-        assertEquals(window.isPinned, true)
-        assertEquals(window.isFloating, true)
+        assertEquals(window.isPoppedOut, true)
 
         await run("pop-out")
         assertEquals(root.layoutDescription, tiles)
@@ -131,13 +130,33 @@ struct PopOutCommandTest {
         assertEquals(window.isPinned, false)
     }
 
-    /// It came along to the workspace that is shown now: it's a tile there
+    /// It stays on its workspace when another one is shown, and pops back into its tile there
+    @Test func testItStaysOnItsWorkspace() async {
+        let first = Workspace.get(byName: "A")
+        let window = TestWindow.new(id: 1, parent: first.rootTilingContainer)
+        TestWindow.new(id: 2, parent: first.rootTilingContainer, adaptiveWeight: 2)
+        let tiles = first.rootTilingContainer.layoutDescription
+        #expect(window.focusWindow())
+        await run("pop-out")
+        await run("workspace B")
+        Workspace.movePinnedWindowsToVisibleWorkspaces()
+        assertEquals(window.nodeWorkspace, first)
+
+        await run("workspace A")
+        #expect(window.focusWindow())
+        await run("pop-out")
+        assertEquals(first.rootTilingContainer.layoutDescription, tiles)
+        assertEquals(window.getWeight(.h), 1)
+    }
+
+    /// Pinned too, it came along to the workspace that is shown now: it's a tile there
     @Test func testItComesAlongAndIsATileWhereItIs() async {
         let first = Workspace.get(byName: "A")
         let window = TestWindow.new(id: 1, parent: first.rootTilingContainer)
         TestWindow.new(id: 2, parent: first.rootTilingContainer)
         #expect(window.focusWindow())
         await run("pop-out")
+        await run("pin")
         await run("workspace B")
         Workspace.movePinnedWindowsToVisibleWorkspaces()
         let second = Workspace.get(byName: "B")
@@ -149,13 +168,14 @@ struct PopOutCommandTest {
         assertEquals(first.rootTilingContainer.layoutDescription, .h_tiles([.window(2)]))
     }
 
-    /// It came along to another workspace and back: it goes back to its tile
+    /// Pinned too, it came along to another workspace and back: it goes back to its tile
     @Test func testItComesBackToItsTile() async {
         let first = Workspace.get(byName: "A")
         let window = TestWindow.new(id: 1, parent: first.rootTilingContainer)
         TestWindow.new(id: 2, parent: first.rootTilingContainer, adaptiveWeight: 2)
         #expect(window.focusWindow())
         await run("pop-out")
+        await run("pin")
         await run("workspace B")
         Workspace.movePinnedWindowsToVisibleWorkspaces()
         assertEquals(window.nodeWorkspace?.name, "B")
@@ -180,6 +200,20 @@ struct PopOutCommandTest {
         assertEquals(window.isFloatedByWorkspaceLayout, true)
     }
 
+    /// Made a tile and floating again meanwhile: it isn't popped out anymore, the command pops it out again
+    @Test func testTiledAndFloatingAgainMeanwhile() async {
+        let workspace = Workspace.get(byName: name)
+        let window = TestWindow.new(id: 1, parent: workspace.rootTilingContainer)
+        TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
+        #expect(window.focusWindow())
+        await run("pop-out")
+        await run("layout tiling")
+        await run("layout floating")
+        assertEquals(window.isPoppedOut, false)
+        await run("pop-out")
+        assertEquals(window.isPoppedOut, true)
+    }
+
     /// Made a tile with `layout tiling` meanwhile: it isn't popped out anymore, the command pops it out again
     @Test func testTiledMeanwhile() async {
         let workspace = Workspace.get(byName: name)
@@ -189,8 +223,7 @@ struct PopOutCommandTest {
         await run("layout tiling")
         assertEquals(window.isFloating, false)
         await run("pop-out")
-        assertEquals(window.isFloating, true)
-        assertEquals(window.isPinned, true)
+        assertEquals(window.isPoppedOut, true)
     }
 
     /// A popped out window is still popped out after a restart of MarSpace
@@ -276,7 +309,7 @@ struct PopOutCommandTest {
     }
 
     /// The focus went to a window in macOS fullscreen on another workspace (it has a Space of its own) and came back: the
-    /// popped out window stayed on its workspace, and pops back into its tile
+    /// popped out and pinned window stayed on its workspace, and pops back into its tile
     @Test func testItDoesNotComeAlongToAMacosFullscreenSpace() async {
         let first = Workspace.get(byName: "A")
         let window = TestWindow.new(id: 1, parent: first.rootTilingContainer)
@@ -284,6 +317,7 @@ struct PopOutCommandTest {
         let tiles = first.rootTilingContainer.layoutDescription
         #expect(window.focusWindow())
         await run("pop-out")
+        await run("pin")
 
         let fullscreen = TestWindow.new(id: 3, parent: Workspace.get(byName: "B").macOsNativeFullscreenWindowsContainer)
         #expect(fullscreen.focusWindow())
@@ -303,6 +337,7 @@ struct PopOutCommandTest {
         let window = TestWindow.new(id: 1, parent: first.rootTilingContainer)
         #expect(window.focusWindow())
         await run("pop-out")
+        await run("pin")
         let fullscreen = TestWindow.new(id: 2, parent: Workspace.get(byName: "B").macOsNativeFullscreenWindowsContainer)
         #expect(fullscreen.focusWindow())
         Workspace.movePinnedWindowsToVisibleWorkspaces()

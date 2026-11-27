@@ -101,7 +101,7 @@ extension Workspace {
         root.restoreChildren(of: snapshot.root, known, away, &restored, &returning)
         // In the order of the tree: the windows that left the same container before know where they come back
         for window in returning {
-            window.window.leaveTilingTreeRememberingSlot(for: window.floatingContainer, isPinned: window.isPinned)
+            window.window.leaveTilingTreeRememberingSlot(for: window.floatingContainer, ownState: window.ownState)
         }
         for window in mostRecentElsewhere { window.markAsMostRecentChild() }
         snapshot.mostRecentWindow.flatMap { known[$0] }?.markAsMostRecentChild()
@@ -133,7 +133,7 @@ extension Workspace {
         var returning: [ReturningWindow] = []
         root.restoreChildren(of: snapshot.root, tiles, away, &restored, &returning)
         for window in returning { // In the order of the tree, see restoreTilingTree
-            window.window.leaveTilingTreeRememberingSlot(for: window.floatingContainer, isPinned: window.isPinned)
+            window.window.leaveTilingTreeRememberingSlot(for: window.floatingContainer, ownState: window.ownState)
         }
     }
 }
@@ -189,7 +189,7 @@ private struct AwayWindowPlaces<WindowId: Hashable & Sendable> {
 private struct ReturningWindow {
     let window: Window
     let floatingContainer: FloatingWindowsContainer
-    let isPinned: Bool
+    let ownState: FloatingOwnState
 }
 
 extension TilingContainer {
@@ -246,7 +246,7 @@ extension TilingContainer {
                     } else if let window = away[id], let floatingContainer = window.parent as? FloatingWindowsContainer,
                               restored.insert(id).inserted
                     {
-                        returning.append(ReturningWindow(window: window, floatingContainer: floatingContainer, isPinned: window.isPinned))
+                        returning.append(ReturningWindow(window: window, floatingContainer: floatingContainer, ownState: window.floatingOwnState))
                         window.bind(to: self, adaptiveWeight: weight, index: INDEX_BIND_LAST)
                     }
                 case .container(let container):

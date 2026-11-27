@@ -179,8 +179,8 @@ struct RememberedTileAcrossRestartTest {
         assertEquals(workspace.rootTilingContainer.layoutDescription, tiles)
     }
 
-    /// Popped out, it came along to another workspace: it stays there after the restart, and remembers its tile. It
-    /// doesn't take the focus of that workspace
+    /// Popped out and pinned, it came along to another workspace: it stays there after the restart, and remembers its
+    /// tile. It doesn't take the focus of that workspace
     @Test func testItCameAlongToAnotherWorkspace() async throws {
         _ = setUpWithNormalizations()
         let first = Workspace.get(byName: "A") // The name of the test isn't a command line argument
@@ -190,6 +190,7 @@ struct RememberedTileAcrossRestartTest {
         let tiles = first.rootTilingContainer.layoutDescription
         #expect(window(1).focusWindow())
         await run("pop-out")
+        await run("pin")
         await run("workspace B")
         Workspace.movePinnedWindowsToVisibleWorkspaces()
         let second = Workspace.get(byName: "B")
