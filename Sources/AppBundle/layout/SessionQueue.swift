@@ -113,6 +113,7 @@ final class SessionQueue {
         let depth = (holder == nil ? 0 : 1) + waiters.count
         let id = try await acquire(kind, name)
         defer { release(id) }
+        try checkCancellation() // Canceled after it got the queue, before it resumed: it gives it back without running
         let queued = ContinuousClock.now - askedAt
         if queued > slowWait {
             perfLogger.error("session=\(name, privacy: .public) waited \(queued.milliseconds) ms for the queue (\(depth) ahead of it)")
@@ -186,17 +187,19 @@ final class SessionQueue {
         guard let request = pendingHeavy else { return }
         heavyTimer?.cancel()
         let due = min(ContinuousClock.now + debounce, request.firstAskedAt + maxWait)
-        heavyTimer = Task.startUnstructured { @MainActor in
+        // Not a part of the session that asked for it, which may still hold the queue: the heavy session waits for it
+        heavyTimer = Self.$holderId.withValue(nil) { Task.startUnstructured { @MainActor in
             try? await Task.sleep(until: due)
             if Task.isCancelled { return }
             self.heavyTimer = nil
             if self.heavyTask == nil { self.startHeavy() }
-        }
+        } }
     }
 
     private func startHeavy() {
-        // Not a part of the session that asked for it: it counts its own accessibility calls (see SessionAxCost)
-        heavyTask = AxStats.$session.withValue(nil) { Task.startUnstructured { @MainActor in
+        // Not a part of the session that asked for it: it counts its own accessibility calls (see SessionAxCost), and it
+        // waits for the queue like any other session, also if that session still holds it
+        heavyTask = Self.$holderId.withValue(nil) { AxStats.$session.withValue(nil) { Task.startUnstructured { @MainActor in
             let name = "heavy \(self.pendingHeavy?.event.description ?? "")"
             _ = try? await self.exclusively(.heavy, name) {
                 guard let request = self.pendingHeavy else { return }
@@ -213,7 +216,7 @@ final class SessionQueue {
                 }
             }
             self.heavyDidEnd()
-        } }
+        } } }
     }
 
     private func heavyDidEnd() {

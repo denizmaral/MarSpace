@@ -79,7 +79,8 @@ struct SessionQueueTest {
         let log = Log()
         let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, _ in log.append("\(event)") }
         for i in 1 ... 10 { queue.scheduleHeavy(.ax("\(i)")) }
-        try await Task.sleep(for: .milliseconds(250))
+        try await until { !log.entries.isEmpty }
+        try await Task.sleep(for: .milliseconds(100)) // No second one
         #expect(log.entries == ["ax(10)"])
     }
 
@@ -114,7 +115,7 @@ struct SessionQueueTest {
         queue.scheduleHeavy(.ax("a"))
         try await until { log.entries == ["ax(a) starts"] }
         for event in ["b", "c", "d"] { queue.scheduleHeavy(.ax(event)) }
-        try await Task.sleep(for: .milliseconds(100)) // Longer than the debounce: it still runs
+        try await Task.sleep(for: .milliseconds(100)) // Longer than the debounce: it still runs, nothing else starts
         #expect(log.entries == ["ax(a) starts"])
         gate.open()
         try await until { log.entries.count == 3 }
@@ -125,8 +126,13 @@ struct SessionQueueTest {
     @Test func testACanceledSessionThatWaitsDoesntRun() async throws {
         let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { _, _ in }
         let gate = Gate(), log = Log()
-        let holder = Task.startUnstructured { @MainActor in _ = try? await queue.exclusively(.light, "holder") { await gate.wait() } }
-        try await until { queue.waitingCount == 0 && !log.entries.contains("x") }
+        let holder = Task.startUnstructured { @MainActor in
+            _ = try? await queue.exclusively(.light, "holder") {
+                log.append("holder")
+                await gate.wait()
+            }
+        }
+        try await until { log.entries == ["holder"] }
         let waiting = Task.startUnstructured { @MainActor () throws in try await queue.exclusively(.light, "waiting") { log.append("waiting runs") } }
         try await until { queue.waitingCount == 1 }
         waiting.cancel()
@@ -136,7 +142,7 @@ struct SessionQueueTest {
         gate.open()
         await holder.value
         try await queue.exclusively(.light, "after") { log.append("after") } // The queue is free
-        #expect(log.entries == ["after"])
+        #expect(log.entries == ["holder", "after"])
     }
 
     @Test func testASessionInASessionRunsRightAway() async throws {
@@ -171,11 +177,59 @@ struct SessionQueueTest {
         }
         try await until { log.entries == ["light starts"] }
         queue.scheduleHeavy(.ax("a"))
-        try await Task.sleep(for: .milliseconds(100))
+        try await until { queue.waitingCount == 1 } // The heavy session waits for the queue
         #expect(log.entries == ["light starts"]) // Doesn't interleave
         gate.open()
         await light.value
         try await until { log.entries.count == 3 }
         #expect(log.entries == ["light starts", "light ends", "heavy ax(a)"])
+    }
+
+    @Test func testALightSessionDoesntPreemptTheStartup() async throws {
+        let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { _, _ in }
+        let log = Log()
+        let startup = Task.startUnstructured { @MainActor in
+            _ = try? await queue.exclusively(.startup, "startup") {
+                log.append("startup starts")
+                try? await Task.sleep(for: .milliseconds(100)) // Not canceled
+                log.append(Task.isCancelled ? "startup is canceled" : "startup ends")
+            }
+        }
+        try await until { log.entries == ["startup starts"] }
+        try await queue.exclusively(.light, "light") { log.append("light") }
+        await startup.value
+        #expect(log.entries == ["startup starts", "startup ends", "light"])
+    }
+
+    @Test func testThePreLayoutThatWasAskedForIsntLost() async throws {
+        let log = Log()
+        var runs = 0
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, preLayout in
+            runs += 1
+            log.append("\(event) \(preLayout)")
+            if runs == 1 { try? await Task.sleep(for: .seconds(5)) } // Preempted
+        }
+        // Coalesced: one of the events asked for it
+        queue.scheduleHeavy(.ax("a"), optimisticallyPreLayoutWorkspaces: true)
+        queue.scheduleHeavy(.ax("b"))
+        try await until { log.entries.count == 1 }
+        #expect(log.entries == ["ax(b) true"])
+        // Preempted: it runs again with it
+        try await queue.exclusively(.light, "light") {}
+        try await until { log.entries.count == 2 }
+        #expect(log.entries == ["ax(b) true", "ax(b) true"])
+    }
+
+    /// A session that holds the queue longer than the debounce asks for a heavy session: the heavy one waits for it
+    @Test func testAHeavySessionThatASessionAsksForWaitsForIt() async throws {
+        let log = Log()
+        let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { event, _ in log.append("heavy \(event)") }
+        try await queue.exclusively(.light, "light") {
+            queue.scheduleHeavy(.ax("a"))
+            try await Task.sleep(for: .milliseconds(100))
+            log.append("light ends")
+        }
+        try await until { log.entries.count == 2 }
+        #expect(log.entries == ["light ends", "heavy ax(a)"])
     }
 }
