@@ -15,9 +15,13 @@ import Common
         sorted.insert(workspace, at: sorted.firstIndex { workspace < $0 } ?? sorted.endIndex)
     }
 
-    static func remove(_ workspace: Workspace) {
-        check(byName.removeValue(forKey: workspace.name) != nil, "\(workspace.name) isn't registered")
-        sorted.removeAll { $0 === workspace }
+    /// All at once: one pass over `sorted`, however many there are
+    static func remove(_ workspaces: [Workspace]) {
+        for workspace in workspaces {
+            check(byName.removeValue(forKey: workspace.name) != nil, "\(workspace.name) isn't registered")
+        }
+        let removed = Set(workspaces.map(ObjectIdentifier.init))
+        sorted.removeAll { removed.contains(ObjectIdentifier($0)) }
     }
 }
 
@@ -87,8 +91,8 @@ final class Workspace: TreeNode, NonLeafTreeNodeObject, Hashable, Comparable {
                 !workspace.isVisible &&
                 workspace.name != focus.workspace.name
         }
+        Registry.remove(garbage)
         for workspace in garbage {
-            Registry.remove(workspace)
             workspace.unbindFromParent()
         }
     }
