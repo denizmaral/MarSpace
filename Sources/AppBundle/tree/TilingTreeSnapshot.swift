@@ -112,6 +112,32 @@ extension Workspace {
     }
 }
 
+extension Workspace {
+    /// The closed windows cache puts the windows back where they were (see
+    /// ``restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow:)``): the tiles of the snapshot wherever they are now, into a
+    /// new root. The floating windows that remember their places in the tree get the places of the snapshot: the places
+    /// that they remember are in the containers that the restore replaced. Called with the floating windows in their
+    /// floating containers, and without a root
+    ///
+    /// - Parameter windows: the windows by their ids, also the ones of the roots that the restore unbound
+    @MainActor
+    func restoreFrozenTilingTree(_ snapshot: TilingTreeSnapshot<OpaqueWindowId>, _ windows: [OpaqueWindowId: Window]) {
+        var tiles: [OpaqueWindowId: Window] = [:]
+        for id in snapshot.root.tileIds { tiles[id] = windows[id] ?? Window.get(byId: id) }
+        var away: [OpaqueWindowId: Window] = [:]
+        for window in Workspace.all.flatMap(\.floatingWindowsIfAny) where !window.isFloatedByWorkspaceLayout {
+            away[window.windowId] = window
+        }
+        let root = TilingContainer(parent: self, adaptiveWeight: 1, snapshot.root.orientation, snapshot.root.layout, index: INDEX_BIND_LAST)
+        var restored: Set<OpaqueWindowId> = []
+        var returning: [ReturningWindow] = []
+        root.restoreChildren(of: snapshot.root, tiles, away, &restored, &returning)
+        for window in returning { // In the order of the tree, see restoreTilingTree
+            window.window.leaveTilingTreeRememberingSlot(for: window.floatingContainer, isPinned: window.isPinned)
+        }
+    }
+}
+
 /// The places in the tiling tree of a workspace where its floating windows come back to (see
 /// ``Window/tilingSlotReturn(on:)``), as nodes of the snapshot
 @MainActor
@@ -238,6 +264,17 @@ extension TilingTreeSnapshot.Container {
             switch child {
                 case .window(let id, _), .away(let id, _): known[id] != nil
                 case .container(let container): container.contains(anyOf: known)
+            }
+        }
+    }
+
+    /// The windows that are tiles in the snapshot, not the floating windows that remember their places
+    fileprivate var tileIds: [WindowId] {
+        children.flatMap { child -> [WindowId] in
+            switch child {
+                case .window(let id, _): [id]
+                case .away: []
+                case .container(let container): container.tileIds
             }
         }
     }
