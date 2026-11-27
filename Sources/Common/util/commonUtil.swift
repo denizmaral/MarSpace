@@ -85,6 +85,8 @@ public enum RefreshSessionEvent: Sendable, CustomStringConvertible {
     case popupRecheck
     case frameReadBack
     case trackpadScroll
+    /// An app that didn't answer in time answers again, see `MacApp.answerDeadline`
+    case appAnswered
 
     public var isStartup: Bool {
         if case .startup = self { return true } else { return false }
@@ -109,6 +111,7 @@ public enum RefreshSessionEvent: Sendable, CustomStringConvertible {
             case .popupRecheck: "popupRecheck"
             case .frameReadBack: "frameReadBack"
             case .trackpadScroll: "trackpadScroll"
+            case .appAnswered: "appAnswered"
         }
     }
 }

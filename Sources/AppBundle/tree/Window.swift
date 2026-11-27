@@ -107,12 +107,12 @@ open class Window: TreeNode, Hashable {
         hasher.combine(windowId)
     }
 
-    func getAxSize(_ cm: CancellationMode) async throws -> CGSize? { die("Not implemented") }
+    @MainActor func getAxSize(_ cm: CancellationMode) async throws -> CGSize? { die("Not implemented") }
     func getTitle(_ cm: CancellationMode) async throws -> String { die("Not implemented") }
 
     func isMacosFullscreen(_ cm: CancellationMode) async throws -> Bool { false }
     func isMacosMinimized(_ cm: CancellationMode) async throws -> Bool { false }
-    func getMacosWindowNativeState(_ cm: CancellationMode) async throws -> MacosWindowNativeState {
+    @MainActor func getMacosWindowNativeState(_ cm: CancellationMode) async throws -> MacosWindowNativeState {
         if try await isMacosFullscreen(cm) { return .nativeFullscreen }
         if try await isMacosMinimized(cm) { return .nativeMinimized }
         return .normal
@@ -129,7 +129,7 @@ open class Window: TreeNode, Hashable {
         }
     }
     @MainActor func nativeFocus() { die("Not implemented") }
-    func getAxRect(_ cm: CancellationMode) async throws -> Rect? { die("Not implemented") }
+    @MainActor func getAxRect(_ cm: CancellationMode) async throws -> Rect? { die("Not implemented") }
     func getCenter(_ cm: CancellationMode) async throws -> CGPoint? { try await getAxRect(cm)?.center }
 
     /// Sends the frame to the window, unless exactly the same frame was already sent.

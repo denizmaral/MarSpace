@@ -148,14 +148,27 @@ final class MacApp: AbstractApp {
         }
     }
 
+    /// Not waited for longer than ``answerDeadline``: the size as it was observed last
+    @MainActor
     func getAxSize(_ windowId: OpaqueWindowId, _ cm: CancellationMode) async throws -> CGSize? {
-        try await withWindow(windowId, cm) { window, job in
-            window.get(Ax.sizeAttr)
+        try await answer(cm, orElse: { _ in Window.get(byId: windowId)?.observedFrame?.size }) {
+            try await $0.withWindow(windowId, cm) { window, job in
+                window.get(Ax.sizeAttr)
+            }
         }
     }
 
-    // todo merge together with detectNewWindows
+    /// Not waited for longer than ``answerDeadline``: the window that the app had focused, as far as MarSpace knows
+    @MainActor
     func getFocusedWindow(_ cm: CancellationMode) async throws -> Window? {
+        try await answer(cm, orElse: { MainActorRef($0.lastFocusedNativeWindowOpaqueId.flatMap(Window.get(byId:))) }) {
+            MainActorRef(try await $0.askFocusedWindow(cm))
+        }.value
+    }
+
+    // todo merge together with detectNewWindows
+    @MainActor
+    private func askFocusedWindow(_ cm: CancellationMode) async throws -> Window? {
         let nativeWindowId = try await thread?.runInLoop(cm) { [pid, axApp, windows] job in
             try axApp.threadGuarded.focusedWindowOfApp // The focus in a sheet is the focus of its window
                 .flatMap { try windows.threadGuarded.getOrRegisterAxWindow(windowId: $0.windowId, $0.ax.cast, pid, job) }?
@@ -231,9 +244,13 @@ final class MacApp: AbstractApp {
         }
     }
 
+    /// Not waited for longer than ``answerDeadline``: the frame as it was observed last
+    @MainActor
     func getAxRect(_ windowId: OpaqueWindowId, _ cm: CancellationMode) async throws -> Rect? {
-        try await withWindow(windowId, cm) { window, job in
-            try AppBundle::getAxRect(window: window, job: job)
+        try await answer(cm, orElse: { _ in Window.get(byId: windowId)?.observedFrame }) {
+            try await $0.withWindow(windowId, cm) { window, job in
+                try AppBundle::getAxRect(window: window, job: job)
+            }
         }
     }
 
@@ -299,12 +316,17 @@ final class MacApp: AbstractApp {
         }
     }
 
+    /// Not waited for longer than ``answerDeadline``: the state that the window is in for MarSpace (its container), so
+    /// that nothing changes until the app answers
+    @MainActor
     func getMacosWindowNativeState(_ windowId: OpaqueWindowId, _ cm: CancellationMode) async throws -> MacosWindowNativeState? {
-        try await withWindow(windowId, cm) { window, job in
-            if window.get(Ax.isFullscreenAttr) == true { return .nativeFullscreen }
-            try job.checkCancellation()
-            if window.get(Ax.minimizedAttr) == true { return .nativeMinimized }
-            return .normal
+        try await answer(cm, orElse: { _ in (Window.get(byId: windowId) as? MacWindow).map(\.nativeStateAsKnown) }) {
+            try await $0.withWindow(windowId, cm) { window, job in
+                if window.get(Ax.isFullscreenAttr) == true { return .nativeFullscreen }
+                try job.checkCancellation()
+                if window.get(Ax.minimizedAttr) == true { return .nativeMinimized }
+                return .normal
+            }
         }
     }
 
@@ -323,19 +345,23 @@ final class MacApp: AbstractApp {
             }
         }
         return try await withThrowingTaskGroup(
-            of: (MainActorRef<MacApp>, [OpaqueWindowId: WindowLifeStatus]).self,
+            of: (MainActorRef<MacApp>, [OpaqueWindowId: WindowLifeStatus])?.self,
             returning: [MacApp: [OpaqueWindowId: WindowLifeStatus]].self,
         ) { group in
             @MainActor func refreshTheApp(_ app: MacApp) {
+                let app = MainActorRef(app)
                 group.addTask { @Sendable @MainActor in
-                    return (MainActorRef.init(app), try await app.refreshAndGetAliveWindowIds(frontmostAppBundleId: frontmostAppBundleId))
+                    return (app, try await app.value.aliveWindowIdsOrKnown(frontmostAppBundleId: frontmostAppBundleId))
                 }
             }
-            // Register new apps
+            // Register new apps, each one in its own task: an app that doesn't answer doesn't hold up the others (see
+            // registerWithinDeadline)
             for running in RunningApps.regular {
                 try checkCancellation()
-                if let app = try await MacApp.getOrRegister(running) {
-                    refreshTheApp(app)
+                let running = MainActorRef(running)
+                group.addTask { @Sendable @MainActor in
+                    guard let app = try await MacApp.registerWithinDeadline(running.value) else { return nil }
+                    return (MainActorRef(app), try await app.aliveWindowIdsOrKnown(frontmostAppBundleId: frontmostAppBundleId))
                 }
             }
             for app in MacApp.allAppsMap.values {
@@ -348,11 +374,25 @@ final class MacApp: AbstractApp {
                 }
             }
             var result: [MacApp: [OpaqueWindowId: WindowLifeStatus]] = [:]
-            for try await (macAppRef, windowIds) in group {
+            for try await case let (macAppRef, windowIds)? in group {
                 result[macAppRef.value] = windowIds
             }
             return result
         }
+    }
+
+    /// Not waited for longer than ``answerDeadline``: the windows of the app as MarSpace has them, with their life
+    /// statuses. Not none: they would be garbage collected as closed
+    @MainActor private func aliveWindowIdsOrKnown(frontmostAppBundleId: String?) async throws -> [OpaqueWindowId: WindowLifeStatus] {
+        try await answer(.cancellable, orElse: { $0.knownWindows }) {
+            try await $0.refreshAndGetAliveWindowIds(frontmostAppBundleId: frontmostAppBundleId)
+        }
+    }
+
+    @MainActor private var knownWindows: [OpaqueWindowId: WindowLifeStatus] {
+        var result: [OpaqueWindowId: WindowLifeStatus] = [:]
+        for window in MacWindow.allWindowsMap.values where window.macApp === self { result[window.windowId] = window.lifeStatus }
+        return result
     }
 
     @MainActor private func refreshAndGetAliveWindowIds(frontmostAppBundleId: String?) async throws -> [OpaqueWindowId: WindowLifeStatus] {
@@ -455,6 +495,88 @@ final class MacApp: AbstractApp {
         setFrameJobs = [:]
         thread?.runInLoopAsync(job: RunLoopJob(.nonCancellable)) { job in CFRunLoopStop(CFRunLoopGetCurrent()) }
         thread = nil // Disallow all future job submissions
+    }
+
+    // MARK: An app that doesn't answer
+
+    /// How long a session waits for an app (see ``answer(_:orElse:_:)``). Measured on 2026-11-27: a healthy app answers
+    /// in milliseconds (the complete refresh sessions took 3-19 ms), one that launches within about a second (Chess
+    /// registered in 1 s). A hung app answers only after the timeout of the accessibility API, about 1.5 s for each
+    /// request: a hotkey waited 1.5-4.5 s while the frontmost app was stopped
+    static let answerDeadline: Duration = .seconds(1)
+
+    /// The app missed ``answerDeadline`` and hasn't answered since: the sessions don't ask it, and don't wait for it
+    @MainActor private(set) var isDegraded = false
+
+    /// The apps that launched and weren't registered within ``answerDeadline`` (their accessibility subscriptions): a
+    /// session follows when they are, see ``registerWithinDeadline(_:)``
+    @MainActor private static var lateRegistrations: Set<pid_t> = []
+
+    /// What a session asks the app for: its answer within ``answerDeadline``. An app that doesn't answer in time (hung,
+    /// or very busy) isn't waited for: `fallback`, what MarSpace knows without asking, is the answer until the app answers
+    /// again (see ``didMissDeadline()``). Every request that a session waits for goes through here
+    ///
+    /// No deadline in the startup session (the apps that launch with the login are slow, and their windows find their
+    /// places of the previous run only while it runs), and for requests that can't be canceled
+    @MainActor
+    private func answer<T: Sendable>(
+        _ cm: CancellationMode,
+        orElse fallback: @MainActor (MacApp) -> T,
+        _ request: @escaping @MainActor @Sendable (MacApp) async throws -> T,
+    ) async throws -> T {
+        if isDegraded { return fallback(self) }
+        let app = MainActorRef(self)
+        if cm == .nonCancellable || isStartup { return try await request(app.value) }
+        switch try await withDeadline(Self.answerDeadline, { try await request(app.value) }) {
+            case .answered(let value): return value
+            case .deadlinePassed:
+                didMissDeadline()
+                return fallback(self)
+        }
+    }
+
+    /// The request was canceled, its job waits behind the one that the app is busy with. Another job after it tells when
+    /// the app answers again: its windows are refreshed then
+    @MainActor
+    private func didMissDeadline() {
+        if isDegraded { return }
+        isDegraded = true
+        perfLogger.error("\(self.name ?? "pid \(self.pid)", privacy: .public) doesn't answer within \(String(describing: Self.answerDeadline), privacy: .public): the sessions go on without it until it answers")
+        let pid = pid
+        thread?.runInLoopAsync(job: RunLoopJob(.nonCancellable), autoCheckCancelled: false) { _ in
+            Task.startUnstructured { @MainActor in MacApp.allAppsMap[pid]?.didAnswerAgain() }
+        }
+    }
+
+    @MainActor
+    private func didAnswerAgain() {
+        guard isDegraded else { return }
+        isDegraded = false
+        perfLogger.info("\(self.name ?? "pid \(self.pid)", privacy: .public) answers again")
+        scheduleCancellableCompleteRefreshSession(.appAnswered)
+    }
+
+    /// The app, registered within ``answerDeadline``. An app that launched and doesn't answer its accessibility
+    /// subscriptions in time isn't waited for: its registration goes on, and a session follows when it's done
+    @MainActor
+    static func registerWithinDeadline(_ running: RunningApp) async throws -> MacApp? {
+        let pid = running.pid
+        if let existing = allAppsMap[pid] { return existing }
+        if isStartup { return try await getOrRegister(running) }
+        if lateRegistrations.contains(pid) { return nil }
+        let runningRef = MainActorRef(running)
+        switch try await withDeadline(answerDeadline, { try await getOrRegister(runningRef.value).map(MainActorRef.init) }) {
+            case .answered(let app): return app?.value
+            case .deadlinePassed:
+                lateRegistrations.insert(pid)
+                perfLogger.error("pid \(pid) isn't registered within \(String(describing: answerDeadline), privacy: .public): the sessions go on without it until it is")
+                Task.startUnstructured { @MainActor in
+                    defer { lateRegistrations.remove(pid) }
+                    // The registration that is under way (see wipPids)
+                    if (try? await getOrRegister(runningRef.value)) != nil { scheduleCancellableCompleteRefreshSession(.appAnswered) }
+                }
+                return nil
+        }
     }
 
     private func withWindow<T>(
