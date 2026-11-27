@@ -98,12 +98,13 @@ struct AppAnswersTest {
         }
         try await Task.sleep(for: .milliseconds(50))
         // Asked before the app answers again, misses its deadline after it
-        let lateIsAsked = Mutex(false)
+        let lateIsAsked = Mutex(false), lateIsAnswered = Mutex(false)
         let late = Task.startUnstructured { @MainActor () throws in
             _ = try await answers.answer(.cancellable, orElse: { -1 }) {
                 lateIsAsked.withLock { $0 = true }
                 return try await thread.runInLoop(.cancellable) { _ -> Int in 1 }
             }
+            lateIsAnswered.withLock { $0 = true }
         }
         for _ in 0 ..< 1000 where !lateIsAsked.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(1)) }
         // Asked while the app wasn't degraded yet: else it would get the fallback, and nothing here would be tested
@@ -111,6 +112,8 @@ struct AppAnswersTest {
         #expect(events.probes == 0)
         try await first.value // Missed: degraded
         #expect(answers.isDegraded)
+        // Still waiting when the app answers again: else it missed before the recovery (the main actor was held up)
+        #expect(!lateIsAnswered.withLock { $0 })
         answers.didAnswerAgain() // As if the probe got its answer
         #expect(!answers.isDegraded)
         try await late.value
