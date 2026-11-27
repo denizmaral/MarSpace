@@ -83,7 +83,8 @@ Every phase is one commit and one deploy, and must reproduce the compiled result
 3. **Where an app opens is a window rule**: moving a window to a workspace with a shortcut makes (or changes) the rule of
    its app, "move the window to workspace M", shown and edited like any other rule. Moves by rules or scripts don't
 4. **No AeroSpace legacy**: no TOML import at the first launch, no TOML parser and default config at runtime, no
-   migration of older settings, no `--config-path`. The default settings are written in Swift
+   migration of older settings. `config --config-path` prints the path of the settings file. The default settings are
+   written in Swift
 5. **Typed commands**: a typed action builds its engine command from its values, without the parser; its words are
    kept as the arguments that the command prints. Only a custom action is a command line, parsed. A golden test requires
    every typed command to equal the parsed command of its command line, and to print the same

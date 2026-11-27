@@ -2,7 +2,7 @@
 include::util/man-attributes.adoc[]
 :manname: aerospace-config
 // tag::purpose[]
-:manpurpose: Query AeroSpace config options
+:manpurpose: Query the binding modes and their shortcuts
 // end::purpose[]
 
 // =========================================================== Synopsis
@@ -22,9 +22,10 @@ aerospace config [-h|--help] --config-path
 // tag::body[]
 {manpurpose}
 
-For now, only `mode.*` config options are supported
+The settings (edited in the settings window) are compiled into the configuration that MarSpace runs. For now, only its
+`mode.*` keys can be queried: the binding modes and their shortcuts.
 
-Under the hood, the config is represented as recursive data structure of maps, arrays, strings, and integers.
+The configuration is represented as a recursive data structure of maps, arrays, strings, and integers.
 
 Printing without `--json` or `--keys` flag is supported only for scalar types (strings and integers) and array of scalar types.
 Printing other complicated objects requires `--json` or `--keys` flag.
@@ -38,7 +39,7 @@ include::util/conditional-options-header.adoc[]
 --all-keys:: Print all available keys recursively
 --json:: Print result in JSON format
 --keys:: Print keys of the complicated object (map or array)
---config-path:: Print absolute path to the loaded config
+--config-path:: Print the absolute path to the settings file
 
 // =========================================================== Examples
 include::util/conditional-examples-header.adoc[]

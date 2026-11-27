@@ -1,6 +1,6 @@
 # LICENSE
 
-MarSpace is licensed under MIT. See [LICENSE](./LICENSE.txt) for the full license text. MarSpace is based on
+MarSpace is licensed under MIT. See [LICENSE](../LICENSE.txt) for the full license text. MarSpace is based on
 [AeroSpace](https://github.com/nikitabobko/AeroSpace), MIT licensed too.
 
 ## Bundled dependencies and materials
@@ -11,11 +11,6 @@ MarSpace bundles the following dependencies and uses the following materials:
 [HotKey GitHub link](https://github.com/soffes/HotKey).
 [HotKey MIT license](./third-party-license/LICENSE-HotKey.txt).
 HotKey is used as a more convenient wrapper around macOS Carbon API to listen for global shortcuts.
-
-**TOMLDecoder**.
-[TOMLDecoder GitHub link](https://github.com/dduan/TOMLDecoder).
-[TOMLDecoder MIT license](./third-party-license/LICENSE-TOMLDecoder.txt).
-TOMLDecoder is used as TOML parsing library.
 
 **swift-collections**.
 [swift-collections GitHub link](https://github.com/apple/swift-collections).

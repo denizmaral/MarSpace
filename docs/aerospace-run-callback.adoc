@@ -2,7 +2,7 @@
 include::util/man-attributes.adoc[]
 :manname: aerospace-run-callback
 // tag::purpose[]
-:manpurpose: Run AeroSpace config callbacks on demand
+:manpurpose: Run the window rules and the automations on demand
 // end::purpose[]
 
 // =========================================================== Synopsis
@@ -20,15 +20,15 @@ aerospace run-callback [-h|--help] (on-focus-changed|on-focused-monitor-changed)
 // tag::body[]
 {manpurpose}
 
-The command lets you manually re-run callbacks that AeroSpace normally invokes in response to events:
+The command lets you manually re-run what MarSpace normally runs in response to events:
 
-* `on-window-detected` - callbacks defined by `on-window-detected` config option.
-  By default the callbacks are run for the focused window only.
-  Pass `--for-every-window` to apply the callbacks to every currently known window
+* `on-window-detected` - the window rules (Settings › Window Rules).
+  By default the rules are run for the focused window only.
+  Pass `--for-every-window` to apply the rules to every currently known window
   (useful right after `reload-config` to retroactively apply new rules to already open windows),
   or pass `--window-id` to target a specific window.
-* `on-focus-changed` - runs commands listed under the `on-focus-changed` config key.
-* `on-focused-monitor-changed` - runs commands listed under the `on-focused-monitor-changed` config key.
+* `on-focus-changed` - the actions of Settings › Automation › When the focus changes.
+* `on-focused-monitor-changed` - the actions of Settings › Automation › When the focused monitor changes.
 
 The command forwards stdout and stderr of all commands run in the callback.
 That opens up one more usecase - you can use this command to see the output of your callbacks.

@@ -1,7 +1,7 @@
 = aerospace-list-modes(1)
 include::util/man-attributes.adoc[]
 // tag::purpose[]
-:manpurpose: Print a list of modes currently specified in the configuration
+:manpurpose: Print a list of the binding modes of the settings
 // end::purpose[]
 :manname: aerospace-list-modes
 
