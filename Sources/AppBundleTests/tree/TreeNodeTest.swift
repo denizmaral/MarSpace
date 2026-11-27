@@ -144,4 +144,16 @@ struct TreeNodeTest {
         workspace.normalizeContainers()
         #expect(workspace.rootTilingContainer.children.singleOrNil() is TestWindow)
     }
+
+    @Test func testParentsGoUpToTheRoot() {
+        let workspace = Workspace.get(byName: name)
+        let container = TilingContainer.newVTiles(parent: workspace.rootTilingContainer, adaptiveWeight: 1)
+        let window = TestWindow.new(id: 1, parent: container)
+
+        let parents = window.parents
+        #expect(parents.prefix(3).map { $0 as TreeNode } == [container, workspace.rootTilingContainer, workspace])
+        #expect(parents.last?.parent == nil)
+        #expect(window.parentsWithSelf == [window] + parents.map { $0 as TreeNode })
+        #expect(workspace.rootTilingContainer.parents.first === workspace)
+    }
 }

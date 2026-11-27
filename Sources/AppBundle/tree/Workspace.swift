@@ -1,7 +1,25 @@
 import AppKit
 import Common
 
-@MainActor private var workspaceNameToWorkspace: [String: Workspace] = [:]
+/// The workspaces by name, and in the order of their names: a workspace is in both or in neither. `Workspace.all` is
+/// read many times per session, it isn't sorted every time
+@MainActor private enum Registry {
+    private static var byName: [String: Workspace] = [:]
+    private(set) static var sorted: [Workspace] = []
+
+    static subscript(name: String) -> Workspace? { byName[name] }
+
+    static func insert(_ workspace: Workspace) {
+        check(byName.updateValue(workspace, forKey: workspace.name) == nil, "\(workspace.name) is already registered")
+        // After the workspaces of an equal name (logical segments: "1" and "01"), in the order they were created
+        sorted.insert(workspace, at: sorted.firstIndex { workspace < $0 } ?? sorted.endIndex)
+    }
+
+    static func remove(_ workspace: Workspace) {
+        check(byName.removeValue(forKey: workspace.name) != nil, "\(workspace.name) isn't registered")
+        sorted.removeAll { $0 === workspace }
+    }
+}
 
 final class Workspace: TreeNode, NonLeafTreeNodeObject, Hashable, Comparable {
     let name: String
@@ -15,16 +33,15 @@ final class Workspace: TreeNode, NonLeafTreeNodeObject, Hashable, Comparable {
         check(forceAssignedMonitorInfo?.toMonitorOrRearrangeMonitors().getWorkspacesContainerOrCreate().bindWorkspace(self) != false)
     }
 
-    @MainActor static var all: [Workspace] {
-        workspaceNameToWorkspace.values.sorted()
-    }
+    /// Sorted by name
+    @MainActor static var all: [Workspace] { Registry.sorted }
 
     @MainActor static func get(byName name: String) -> Workspace {
-        if let existing = workspaceNameToWorkspace[name] {
+        if let existing = Registry[name] {
             return existing
         } else {
             let workspace = Workspace(name)
-            workspaceNameToWorkspace[name] = workspace
+            Registry.insert(workspace)
             return workspace
         }
     }
@@ -64,14 +81,14 @@ final class Workspace: TreeNode, NonLeafTreeNodeObject, Hashable, Comparable {
             _ = get(byName: name) // Make sure that all persistent workspaces are "cached"
         }
         let focus = globalFocus
-        let garbage = workspaceNameToWorkspace.values.filter { workspace in
+        let garbage = Registry.sorted.filter { workspace in
             !config.persistentWorkspaces.contains(workspace.name) &&
                 workspace.isEffectivelyEmpty &&
                 !workspace.isVisible &&
                 workspace.name != focus.workspace.name
         }
         for workspace in garbage {
-            workspaceNameToWorkspace.removeValue(forKey: workspace.name)
+            Registry.remove(workspace)
             workspace.unbindFromParent()
         }
     }

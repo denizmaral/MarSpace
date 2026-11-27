@@ -39,8 +39,19 @@ extension TreeNode {
         }
     }
 
-    var parents: [NonLeafTreeNodeObject] { parent.flatMap { [$0] + $0.parents } ?? [] }
-    var parentsWithSelf: [TreeNode] { parent.flatMap { [self] + $0.parentsWithSelf } ?? [self] }
+    /// From the parent up to the root
+    var parents: [NonLeafTreeNodeObject] {
+        var result: [NonLeafTreeNodeObject] = []
+        var node = parent
+        while let current = node {
+            result.append(current)
+            node = current.parent
+        }
+        return result
+    }
+
+    /// From the node itself up to the root
+    var parentsWithSelf: [TreeNode] { [self] + parents }
 
     /// Also see visualWorkspace
     var nodeWorkspace: Workspace? {
