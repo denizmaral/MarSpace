@@ -32,7 +32,7 @@ struct SessionQueueTest {
     }
 
     @Test func testLightSessionsRunOneAtATimeInTheirOrder() async throws {
-        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { _, _ in }
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { _, _, _ in }
         let gate = Gate(), log = Log()
         let first = Task.startUnstructured { @MainActor in
             _ = try? await queue.exclusively(.light, "1") {
@@ -57,7 +57,7 @@ struct SessionQueueTest {
     @Test func testALightSessionPreemptsARunningHeavyOneThatRunsAgainAfterIt() async throws {
         let log = Log()
         var runs = 0
-        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, _ in
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, _, _ in
             runs += 1
             log.append("heavy \(event) starts")
             guard runs == 1 else { return }
@@ -77,7 +77,7 @@ struct SessionQueueTest {
 
     @Test func testABurstOfEventsIsOneHeavySessionWithTheLastEvent() async throws {
         let log = Log()
-        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, _ in log.append("\(event)") }
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, _, _ in log.append("\(event)") }
         for i in 1 ... 10 { queue.scheduleHeavy(.ax("\(i)")) }
         try await until { !log.entries.isEmpty }
         try await Task.sleep(for: .milliseconds(100)) // No second one
@@ -88,7 +88,7 @@ struct SessionQueueTest {
         let log = Log()
         let start = ContinuousClock.now
         var firstRun: Duration? = nil
-        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, _ in
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, _, _ in
             firstRun = firstRun ?? ContinuousClock.now - start
             log.append("\(event)")
         }
@@ -105,7 +105,7 @@ struct SessionQueueTest {
 
     @Test func testEventsWhileAHeavySessionRunsMakeOneMoreAndDontCancelIt() async throws {
         let gate = Gate(), log = Log()
-        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, _ in
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, _, _ in
             log.append("\(event) starts")
             if event.description == "ax(a)" {
                 await gate.wait()
@@ -124,7 +124,7 @@ struct SessionQueueTest {
     }
 
     @Test func testACanceledSessionThatWaitsDoesntRun() async throws {
-        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { _, _ in }
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { _, _, _ in }
         let gate = Gate(), log = Log()
         let holder = Task.startUnstructured { @MainActor in
             _ = try? await queue.exclusively(.light, "holder") {
@@ -146,7 +146,7 @@ struct SessionQueueTest {
     }
 
     @Test func testASessionInASessionRunsRightAway() async throws {
-        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { _, _ in }
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { _, _, _ in }
         let log = Log()
         try await queue.exclusively(.light, "outer") {
             try await queue.exclusively(.light, "inner") { log.append("inner") }
@@ -158,7 +158,7 @@ struct SessionQueueTest {
 
     @Test func testASessionThatThrowsReleasesTheQueue() async throws {
         struct Failure: Error {}
-        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { _, _ in }
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { _, _, _ in }
         await #expect(throws: Failure.self) { try await queue.exclusively(.light, "throws") { throw Failure() } }
         let log = Log()
         try await queue.exclusively(.light, "next") { log.append("next") }
@@ -167,7 +167,7 @@ struct SessionQueueTest {
 
     @Test func testAHeavySessionWaitsForTheLightOnes() async throws {
         let gate = Gate(), log = Log()
-        let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { event, _ in log.append("heavy \(event)") }
+        let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { event, _, _ in log.append("heavy \(event)") }
         let light = Task.startUnstructured { @MainActor in
             _ = try? await queue.exclusively(.light, "light") {
                 log.append("light starts")
@@ -186,7 +186,7 @@ struct SessionQueueTest {
     }
 
     @Test func testALightSessionDoesntPreemptTheStartup() async throws {
-        let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { _, _ in }
+        let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { _, _, _ in }
         let log = Log()
         let startup = Task.startUnstructured { @MainActor in
             _ = try? await queue.exclusively(.startup, "startup") {
@@ -204,7 +204,7 @@ struct SessionQueueTest {
     @Test func testThePreLayoutThatWasAskedForIsntLost() async throws {
         let log = Log()
         var runs = 0
-        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, preLayout in
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { event, preLayout, _ in
             runs += 1
             log.append("\(event) \(preLayout)")
             if runs == 1 { try? await Task.sleep(for: .seconds(5)) } // Preempted
@@ -223,7 +223,7 @@ struct SessionQueueTest {
     /// A session that holds the queue longer than the debounce asks for a heavy session: the heavy one waits for it
     @Test func testAHeavySessionThatASessionAsksForWaitsForIt() async throws {
         let log = Log()
-        let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { event, _ in log.append("heavy \(event)") }
+        let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { event, _, _ in log.append("heavy \(event)") }
         try await queue.exclusively(.light, "light") {
             queue.scheduleHeavy(.ax("a"))
             try await Task.sleep(for: .milliseconds(100))
@@ -235,7 +235,7 @@ struct SessionQueueTest {
 
     /// Canceled right after it got the queue, before it resumed: it gives the queue back without running
     @Test func testASessionCanceledWhenItGetsTheQueueDoesntRun() async throws {
-        let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { _, _ in }
+        let queue = SessionQueue(debounce: .milliseconds(10), maxWait: .milliseconds(50)) { _, _, _ in }
         let gate = Gate(), log = Log()
         var granted: Task<(), any Error>? = nil
         var holderEntered = false
@@ -257,5 +257,38 @@ struct SessionQueueTest {
         if case .failure(let error) = result { #expect(error is CancellationError) } else { Issue.record("It ran") }
         await next.value
         #expect(log.entries == ["next"])
+    }
+
+    /// A burst is one session for what any of its events may have changed (see RefreshScope)
+    @Test func testABurstOfEventsIsOneHeavySessionForAllTheirScopes() async throws {
+        let log = Log()
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { _, _, scope in log.append("\(scope)") }
+        queue.scheduleHeavy(.frameReadBack, scope: .layout)
+        queue.scheduleHeavy(.ax("a"), scope: .apps([2]))
+        queue.scheduleHeavy(.ax("b"), scope: .apps([1]))
+        try await until { !log.entries.isEmpty }
+        queue.scheduleHeavy(.ax("c"), scope: .apps([3]))
+        queue.scheduleHeavy(.globalObserverLeftMouseUp)
+        try await until { log.entries.count == 2 }
+        #expect(log.entries == ["apps(1,2)", "everything"])
+    }
+
+    /// A light session cancels a heavy one: the next one sees what the canceled one didn't yet, also when other events
+    /// came meanwhile
+    @Test func testAHeavySessionCanceledByALightOneKeepsItsScope() async throws {
+        let log = Log()
+        var runs = 0
+        let queue = SessionQueue(debounce: .milliseconds(30), maxWait: .milliseconds(150)) { _, _, scope in
+            runs += 1
+            log.append("\(scope)")
+            guard runs == 1 else { return }
+            try? await Task.sleep(for: .seconds(5)) // Waits for an app
+        }
+        queue.scheduleHeavy(.globalObserverLeftMouseUp)
+        try await until { log.entries.count == 1 }
+        queue.scheduleHeavy(.ax("a"), scope: .apps([1])) // Comes while it runs
+        try await queue.exclusively(.light, "light") {}
+        try await until { log.entries.count == 2 }
+        #expect(log.entries == ["everything", "everything"])
     }
 }

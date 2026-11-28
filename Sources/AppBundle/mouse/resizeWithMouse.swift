@@ -15,7 +15,7 @@ func resizedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutabl
         // The window may be moved or resized by somebody else (the user, the app). See Window.setAxFrame
         window?.invalidateSentFrame()
         guard let window, try await isManipulatedWithMouse(window) else {
-            scheduleCancellableCompleteRefreshSession(.ax(notif))
+            scheduleCancellableCompleteRefreshSession(.ax(notif), scope: .app(pid))
             return
         }
         FocusBorderController.shared.hideForMouseDrag()

@@ -83,6 +83,10 @@ final class SessionAxCost: Sendable {
         var sizeFittings = 0
         var sizeFittingAsks = 0
         var sizeFittingDuration: Duration = .zero
+        /// A complete refresh session: the apps that it asked for their windows, of the running ones (see RefreshScope)
+        var appsAsked: (asked: Int, of: Int)? = nil
+        /// A complete refresh session: the windows whose native state it read (2 reads each)
+        var nativeStateReads: Int? = nil
     }
 
     private let name: String
@@ -96,6 +100,9 @@ final class SessionAxCost: Sendable {
     var counters: AxStats.Counters { state.withLock { $0.counters } }
 
     func record(_ call: AxStats.Call) { state.withLock { $0.counters.record(call) } }
+
+    func recordAppsAsked(_ asked: Int, of total: Int) { state.withLock { $0.appsAsked = (asked, total) } }
+    func recordNativeStateReads(_ windows: Int) { state.withLock { $0.nativeStateReads = windows } }
 
     func recordSizeFitting(asks: Int, duration: Duration) {
         state.withLock {
@@ -123,8 +130,8 @@ final class SessionAxCost: Sendable {
 
     deinit {
         let now = ContinuousClock.now - start
-        let (ax, duration, jobs, footprint, fittings, fittingAsks, fittingDuration) = state.withLock {
-            ($0.counters, $0.duration ?? now, $0.jobsDuration, $0.footprintMegabytes, $0.sizeFittings, $0.sizeFittingAsks, $0.sizeFittingDuration)
+        let (ax, duration, jobs, footprint, fittings, fittingAsks, fittingDuration, apps, nativeStates) = state.withLock {
+            ($0.counters, $0.duration ?? now, $0.jobsDuration, $0.footprintMegabytes, $0.sizeFittings, $0.sizeFittingAsks, $0.sizeFittingDuration, $0.appsAsked, $0.nativeStateReads)
         }
         let jobsDuration = max(duration, jobs ?? duration)
         let outside = AxStats.callsOutsideOfSessions.total
@@ -133,9 +140,10 @@ final class SessionAxCost: Sendable {
                 (wait.coalesced.map { " coalesced=\($0)" } ?? "") + (wait.isRerun.map { " rerun=\($0)" } ?? "")
         } ?? ""
         // The frames sent on the screen are fitted into their tiles: asks for less, when a window rounds its tile up
+        let refresh = (apps.map { " apps=\($0.asked)/\($0.of)" } ?? "") + (nativeStates.map { " nativeStates=\($0)" } ?? "")
         let fitting = fittings == 0 ? "" : " sizeFittings=\(fittings) sizeFittingAsks=\(fittingAsks) sizeFittingMs=\(fittingDuration.milliseconds)"
         perfLogger.debug(
-            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public)\(fitting, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
+            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public)\(refresh, privacy: .public)\(fitting, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
         )
     }
 }
