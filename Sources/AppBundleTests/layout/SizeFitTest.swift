@@ -43,11 +43,22 @@ struct SizeFitTest {
     }
 
     /// The excess is subtracted, then twice and four times as much: a request a little below the tile still goes to the
-    /// nearest line above
-    @Test func testSmallExcessIsSubtractedTwiceAsMuchEachTime() {
-        let negotiation = negotiate(CGSize(width: 500, height: 788), Self.nearestLines)
-        assertEquals(negotiation.answers.map(\.request.height), [788, 785, 779])
-        assertEquals(negotiation.answers.map(\.got.height), [791, 791, 777])
+    /// nearest line above. The line below is further from the tile than the one above (11 against 3): the window is
+    /// asked for the tile again, and takes the line above
+    @Test func testNearerLineAboveIsTaken() {
+        let tile = CGSize(width: 500, height: 788)
+        let negotiation = negotiate(tile, Self.nearestLines)
+        assertEquals(negotiation.answers.map(\.request.height), [788, 785, 779, 788])
+        assertEquals(negotiation.answers.map(\.got.height), [791, 791, 777, 791])
+        assertEquals(negotiation.fit.height, .roundedUp)
+        assertEquals(negotiation.fit.request, tile)
+        assertEquals(fitting(tile).topLeft(for: negotiation.fit), CGPoint(x: 10, y: 41 - 1.5))
+    }
+
+    /// On a tie the line below is taken: the window doesn't cover the gaps
+    @Test func testTieTakesTheLineBelow() {
+        let negotiation = negotiate(CGSize(width: 500, height: 784), Self.nearestLines) // 791 and 777
+        assertEquals(negotiation.fit.got.height, 777)
         assertEquals(negotiation.fit.height, .roundedDown)
     }
 
