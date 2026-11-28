@@ -38,7 +38,8 @@ enum GlobalObserver {
                     break
             }
             if notifName == NSWorkspace.didActivateApplicationNotification.rawValue {
-                scheduleCancellableCompleteRefreshSession(.globalObserver(notifName), optimisticallyPreLayoutWorkspaces: true)
+                let scope = RefreshScope.afterActivation(of: pid) // The windows of the other apps didn't change
+                scheduleCancellableCompleteRefreshSession(.globalObserver(notifName), scope: scope, optimisticallyPreLayoutWorkspaces: true)
             } else {
                 scheduleCancellableCompleteRefreshSession(.globalObserver(notifName))
             }
@@ -113,7 +114,7 @@ enum GlobalObserver {
                     // Detect close button clicks for unfocused windows. Yes, kAXUIElementDestroyedNotification is that unreliable
                     //  And trigger new window detection that could be delayed due to mouseDown event
                     default:
-                        scheduleCancellableCompleteRefreshSession(.globalObserverLeftMouseUp)
+                        scheduleCancellableCompleteRefreshSession(.globalObserverLeftMouseUp, scope: .afterClick(at: mouseLocation))
                 }
             }
         }

@@ -331,7 +331,7 @@ private nonisolated func axWindowUnderMouse(_ location: CGPoint) async -> AxElem
 
 /// The front most window at the location: of the app `pid` (any layer: its menus and popovers too), or of any other app
 /// than AeroSpace (the focus border) in the normal layer. The window server knows the z-order, no accessibility calls
-private nonisolated func topmostWindow(at location: CGPoint, of pid: pid_t? = nil) -> (id: CGWindowID, pid: pid_t, layer: Int)? {
+nonisolated func topmostWindow(at location: CGPoint, of pid: pid_t? = nil) -> (id: CGWindowID, pid: pid_t, layer: Int)? {
     let infos = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
     let ownPid = ProcessInfo.processInfo.processIdentifier
     for info in infos { // Front to back

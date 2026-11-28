@@ -53,4 +53,21 @@ struct RefreshScopeTest {
         assertEquals(completeRefreshSessionsAskedForInTests.count { if case .frameReadBack = $0 { true } else { false } } > 0, true)
         assertEquals(Set(completeRefreshScopesAskedForInTests), [.layout])
     }
+
+    /// The session after a command asks the apps of the focus before and after it, and the frontmost one
+    @Test func testAfterACommandTheAppsOfTheFocusAreAsked() {
+        let window = TestWindow.new(id: 1, parent: Workspace.get(byName: "RefreshScopeTest").rootTilingContainer)
+        let scope = RefreshScope.afterLightSession(focusBefore: nil, focusAfter: window)
+        guard case .apps(let pids) = scope else { Issue.record("\(scope)"); return }
+        assertEquals(pids.contains(TestApp.shared.pid), true)
+        if let frontmost = RunningApps.frontmost?.pid { assertEquals(pids.contains(frontmost), true) }
+        assertEquals(pids.count <= 2, true)
+    }
+
+    /// The session after an activation asks the app that got the focus
+    @Test func testAfterAnActivationTheActivatedAppIsAsked() {
+        assertEquals(RefreshScope.afterActivation(of: nil), .everything)
+        guard case .apps(let pids) = RefreshScope.afterActivation(of: 12345) else { Issue.record("not apps"); return }
+        assertEquals(pids.contains(12345), true)
+    }
 }
