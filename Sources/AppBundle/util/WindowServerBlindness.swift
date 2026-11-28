@@ -57,7 +57,7 @@ final class WindowServerBlindness {
     private func observe(isBlind: Bool) -> BlindPeriods.Snapshot {
         let before = periods.epoch
         let snapshot = periods.observe(isBlind: isBlind)
-        if snapshot.epoch != before { perfLogger.notice("lock period \(snapshot.epoch) began: the windows aren't comparable across it") }
+        if snapshot.epoch != before { perfLogger.notice("blind period \(snapshot.epoch) began: the windows aren't comparable across it") }
         return snapshot
     }
 
