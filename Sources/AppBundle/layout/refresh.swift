@@ -49,9 +49,9 @@ func runHeavyCompleteRefreshSession(
     if !TrayMenuModel.shared.isEnabled { return }
     // Asked for some apps and asks every app, because the last time is too long ago: what it finds of the other apps
     // wasn't notified (see FullSweeps)
-    let plan = fullSweeps.begin(requested, now: .now, lock: ScreenLock.shared.now())
+    let plan = fullSweeps.begin(requested, now: .now, lock: ScreenLock.shared.observeNow)
     let scope = plan.scope
-    let missed = MissedChanges(plan.check)
+    let missed = MissedChanges(plan)
     let axCost = SessionAxCost("heavy \(event) scope=\(scope)\(scope != requested ? " asked=\(requested)" : "")")
     defer { axCost.sessionDidFinish() }
     let res = await Result {
@@ -84,7 +84,7 @@ func runHeavyCompleteRefreshSession(
     }
     switch res {
         case .success(()):
-            missed.report(fullSweeps.end(plan, now: .now, lock: ScreenLock.shared.now()))
+            missed.report(fullSweeps.end(plan, now: .now, lock: ScreenLock.shared.observeNow), to: axCost)
         case .failure(let err as CancellationError): check(assumeCancellable, "Non cancellable refresh session was canceled: \(err) (\(type(of: err)))")
         case .failure(let err): die("Illegal error: \(err)")
     }

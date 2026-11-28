@@ -133,6 +133,7 @@ final class SessionAxCost: Sendable {
     func recordAppsAsked(_ asked: Int, of total: Int) { state.withLock { $0.appsAsked = (asked, total) } }
     func recordNativeStateReads(_ windows: Int) { state.withLock { $0.nativeStateReads = windows } }
     func recordMissedCheck(_ check: MissedCheck, notices: Int) { state.withLock { $0.missedCheck = (check, notices) } }
+    var missedCheck: (check: MissedCheck, notices: Int)? { state.withLock { $0.missedCheck } }
 
     func recordSizeFitting(asks: Int, duration: Duration) {
         state.withLock {

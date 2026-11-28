@@ -65,7 +65,7 @@ struct RefreshScopeTest {
         assertEquals(RefreshScope.afterLightSession(.startup, focusBefore: window, focusAfter: window), .everything)
     }
 
-    /// A period begins when the screen locks: the epoch changes once for it
+    /// A period begins when the window server goes blind: the epoch changes once for it
     @Test func testTheLockPeriodsAreCounted() {
         var periods = LockPeriods()
         assertEquals(periods.observe(isLocked: false), LockPeriods.Snapshot(epoch: 0, isLocked: false))
@@ -75,70 +75,102 @@ struct RefreshScopeTest {
         assertEquals(periods.observe(isLocked: true), LockPeriods.Snapshot(epoch: 2, isLocked: true))
     }
 
+    /// The notifications start a period; the ones of the unlock and the wake read the window server: awake isn't unlocked
+    @Test func testTheNotificationsOfTheLockAndTheWake() {
+        var isBlind = false
+        let lock = ScreenLock(readsWindowServer: { isBlind })
+        assertEquals(lock.observeNow(), LockPeriods.Snapshot(epoch: 0, isLocked: false))
+        lock.handle(.blind) // The displays sleep: the window server would say so as well
+        isBlind = true
+        lock.handle(.mayBeBack) // Awake, still locked
+        assertEquals(lock.observeNow(), LockPeriods.Snapshot(epoch: 1, isLocked: true))
+        isBlind = false
+        lock.handle(.mayBeBack) // Unlocked
+        assertEquals(lock.observeNow(), LockPeriods.Snapshot(epoch: 1, isLocked: false))
+        lock.handle(.blind) // A lock between two sessions that read nothing in between: still a period
+        lock.handle(.mayBeBack)
+        assertEquals(lock.observeNow(), LockPeriods.Snapshot(epoch: 2, isLocked: false))
+    }
+
     /// A session that asks every app because the last full sweep is too long ago reports what it finds of the other
-    /// apps, also when no other session ran since: they didn't notify
+    /// apps, also when no other session ran since: they didn't notify. Only full sweeps read the lock state
     @Test func testAWidenedSessionReportsTheOtherApps() {
         let start = ContinuousClock.now
         let late = start + RefreshScope.fullSweepInterval
         let unlocked = LockPeriods.Snapshot(epoch: 0, isLocked: false)
+        var reads = 0
+        let lock = { reads += 1; return unlocked }
         var sweeps = FullSweeps()
-        let first = sweeps.begin(.apps([1]), now: start, lock: unlocked)
-        assertEquals(first.scope, .everything)
-        assertEquals(first.check, .off(.noCleanSweep)) // Nothing to compare with
-        assertEquals(sweeps.end(first, now: start, lock: unlocked), .off(.noCleanSweep))
+        let first = sweeps.begin(.apps([1]), now: start, lock: lock)
+        assertEquals(first, .fullSweep(widenedFrom: [1], check: .off(.noCleanSweep), lockAtStart: unlocked)) // Nothing to compare with
+        assertEquals(sweeps.end(first, now: start, lock: lock), .off(.noCleanSweep))
+        assertEquals(reads, 2)
 
-        let scoped = sweeps.begin(.apps([1]), now: start + .seconds(1), lock: unlocked)
-        assertEquals(scoped, SessionPlan(scope: .apps([1]), check: .off(.notWidened), lockAtStart: unlocked))
-        assertEquals(sweeps.begin(.everything, now: late, lock: unlocked).check, .off(.notWidened)) // Asked for every app
+        let scoped = sweeps.begin(.apps([1]), now: start + .seconds(1), lock: lock)
+        assertEquals(scoped, .scoped(.apps([1])))
+        assertEquals(sweeps.end(scoped, now: start + .seconds(1), lock: lock), nil)
+        assertEquals(reads, 2) // A scoped session doesn't read it
+        assertEquals(sweeps.begin(.everything, now: late, lock: lock), .fullSweep(widenedFrom: nil, check: .off(.notWidened), lockAtStart: unlocked))
 
-        let widened = sweeps.begin(.apps([1]), now: late, lock: unlocked) // No session ran since the full sweep
-        assertEquals(widened, SessionPlan(scope: .everything, check: .on(askedFor: [1]), lockAtStart: unlocked))
-        assertEquals(sweeps.end(widened, now: late, lock: unlocked), .on(askedFor: [1]))
-        assertEquals(sweeps.begin(.layout, now: late + RefreshScope.fullSweepInterval, lock: unlocked).check, .on(askedFor: []))
+        let widened = sweeps.begin(.apps([1]), now: late, lock: lock)
+        assertEquals(widened, .fullSweep(widenedFrom: [1], check: .on, lockAtStart: unlocked))
+        assertEquals(sweeps.end(widened, now: late, lock: lock), .on)
+        assertEquals(sweeps.begin(.layout, now: late + RefreshScope.fullSweepInterval, lock: lock), .fullSweep(widenedFrom: [], check: .on, lockAtStart: unlocked))
     }
 
     /// The windows come back after the lock, the apps don't notify: nothing is reported
     @Test func testNothingIsReportedAcrossALock() {
         let start = ContinuousClock.now
         let late = start + RefreshScope.fullSweepInterval
-        let unlocked = LockPeriods.Snapshot(epoch: 0, isLocked: false)
-        let locked = LockPeriods.Snapshot(epoch: 1, isLocked: true)
-        let unlockedAgain = LockPeriods.Snapshot(epoch: 1, isLocked: false)
+        let unlocked = { LockPeriods.Snapshot(epoch: 0, isLocked: false) }
+        let locked = { LockPeriods.Snapshot(epoch: 1, isLocked: true) }
+        let unlockedAgain = { LockPeriods.Snapshot(epoch: 1, isLocked: false) }
+        func check(_ plan: SessionPlan) -> MissedCheck? { if case .fullSweep(_, let check, _) = plan { check } else { nil } }
         var clean = FullSweeps()
         _ = clean.end(clean.begin(.everything, now: start, lock: unlocked), now: start, lock: unlocked)
 
-        // Locked since the last full sweep: at the start of the session, or unlocked again before it
-        assertEquals(clean.begin(.apps([1]), now: late, lock: locked).check, .off(.screenLocked))
-        assertEquals(clean.begin(.apps([1]), now: late, lock: unlockedAgain).check, .off(.screenLocked))
+        // Blind since the last full sweep: at the start of the session, or unlocked again before it
+        assertEquals(check(clean.begin(.apps([1]), now: late, lock: locked)), .off(.screenLocked))
+        assertEquals(check(clean.begin(.apps([1]), now: late, lock: unlockedAgain)), .off(.screenLocked))
 
         // Locked during the session that reports: decided when it ends
         var during = clean
         let plan = during.begin(.apps([1]), now: late, lock: unlocked)
-        assertEquals(plan.check, .on(askedFor: [1]))
+        assertEquals(check(plan), .on)
         assertEquals(during.end(plan, now: late, lock: unlockedAgain), .off(.screenLocked))
-        assertEquals(during.end(plan, now: late, lock: locked), .off(.screenLocked))
         // That full sweep saw the lock: no clean one to compare with until the next one
-        assertEquals(during.begin(.apps([1]), now: late + RefreshScope.fullSweepInterval, lock: unlockedAgain).check, .off(.noCleanSweep))
+        assertEquals(check(during.begin(.apps([1]), now: late + RefreshScope.fullSweepInterval, lock: unlockedAgain)), .off(.noCleanSweep))
 
         // A full sweep that started behind the lock and ended after the unlock isn't clean either
         var behind = FullSweeps()
         _ = behind.end(behind.begin(.everything, now: start, lock: locked), now: start, lock: unlockedAgain)
-        assertEquals(behind.begin(.apps([1]), now: late, lock: unlockedAgain).check, .off(.noCleanSweep))
+        assertEquals(check(behind.begin(.apps([1]), now: late, lock: unlockedAgain)), .off(.noCleanSweep))
 
         // The next full sweep after the unlock is clean again
         _ = behind.end(behind.begin(.everything, now: late, lock: unlockedAgain), now: late, lock: unlockedAgain)
-        assertEquals(behind.begin(.apps([1]), now: late + RefreshScope.fullSweepInterval, lock: unlockedAgain).check, .on(askedFor: [1]))
+        assertEquals(check(behind.begin(.apps([1]), now: late + RefreshScope.fullSweepInterval, lock: unlockedAgain)), .on)
     }
 
-    /// The changes of the apps that the session wasn't asked for are collected, and logged only if the end decides so
-    @Test func testTheMissedChangesAreCollectedOutsideTheAskedApps() {
-        let on = MissedChanges(.on(askedFor: [1]))
-        on.note(1, "window 1 appeared")
-        on.note(2, "window 2 appeared")
-        assertEquals(on.notices, ["window 2 appeared of 2"])
-        let off = MissedChanges(.off(.notWidened))
-        off.note(2, "window 2 appeared")
-        assertEquals(off.notices, [])
+    /// A widened full sweep collects the changes of the apps that it wasn't asked for whatever the check: logged if the
+    /// end decides so, counted on the perf line of the session either way
+    @Test func testTheMissedChangesAreCollectedAndCounted() {
+        let unlocked = LockPeriods.Snapshot(epoch: 0, isLocked: false)
+        let widened = MissedChanges(.fullSweep(widenedFrom: [1], check: .off(.screenLocked), lockAtStart: unlocked))
+        widened.note(1, "window 1 appeared")
+        widened.note(2, "window 2 appeared")
+        assertEquals(widened.notices, ["window 2 appeared of 2"])
+        let cost = SessionAxCost("test")
+        widened.report(.off(.screenLocked), to: cost) // Outside of the task of the session too
+        assertEquals(cost.missedCheck?.check, .off(.screenLocked))
+        assertEquals(cost.missedCheck?.notices, 1)
+
+        let scoped = MissedChanges(.scoped(.apps([1])))
+        scoped.note(2, "window 2 appeared")
+        assertEquals(scoped.notices, [])
+        let scopedCost = SessionAxCost("test")
+        scoped.report(nil, to: scopedCost)
+        assertEquals(scopedCost.missedCheck == nil, true)
+        assertEquals(MissedChanges(.fullSweep(widenedFrom: nil, check: .off(.notWidened), lockAtStart: unlocked)).notices, [])
     }
 
     /// The apps that are known, every app if none is

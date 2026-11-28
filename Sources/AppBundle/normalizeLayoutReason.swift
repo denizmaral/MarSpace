@@ -5,7 +5,7 @@ import AppKit
 
 /// - Parameter pids: the apps of the session, nil: every app (see `RefreshScope.readsNativeState`)
 /// - Parameter missed: the changes of the apps that the session wasn't asked for (see `FullSweeps`)
-@MainActor func normalizeLayoutReason(_ pids: Set<pid_t>? = nil, missed: MissedChanges = MissedChanges(.off(.notWidened))) async throws {
+@MainActor func normalizeLayoutReason(_ pids: Set<pid_t>? = nil, missed: MissedChanges) async throws {
     // Windows of invisible workspaces are hidden in the corner of the screen, their native state rarely changes. Saves
     // a round trip per window per refresh session (see nativeState(of:)). They are checked:
     // - when AX notifies about a native state change (e.g. "Minimize All"), see refreshObs, or AeroSpace changes it

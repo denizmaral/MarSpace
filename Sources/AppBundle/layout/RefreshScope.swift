@@ -133,90 +133,115 @@ extension RefreshScope {
 /// The complete refresh sessions that asked every app (full sweeps). A session that was asked for some apps asks every
 /// app when the last full sweep is too long ago (see `RefreshScope.effective(lastFullSweep:now:)`). What it finds of the
 /// other apps wasn't notified by them: it would have been missed without the full sweep, it's reported (see
-/// `MissedChanges`). Unless the screen was locked (see `ScreenLock`) since the last full sweep started: the windows
-/// come back after the unlock, and the apps don't notify about it
+/// `MissedChanges`). Unless the window server was blind (see `ScreenLock`) since the last full sweep started, or during
+/// the session: the windows come back after the unlock, and the apps don't notify about it.
+///
+/// The lock state is read only by full sweeps: the scoped sessions decide nothing with it
 struct FullSweeps: Sendable {
     /// When the last full sweep ended, nil if none did
     private var last: ContinuousClock.Instant? = nil
-    /// The lock epoch of the last full sweep, nil if the screen was locked during it, or none ran
+    /// The lock epoch of the last full sweep, nil if the window server was blind during it, or none ran
     private var cleanEpoch: UInt64? = nil
 
-    /// A session begins: its scope, and whether it reports what it finds of the apps that it wasn't asked for
-    func begin(_ requested: RefreshScope, now: ContinuousClock.Instant, lock: LockPeriods.Snapshot) -> SessionPlan {
+    /// A session begins: its scope, and for a full sweep whether it reports what it finds of the apps that it wasn't
+    /// asked for
+    /// - Parameter lock: reads the lock state (see `ScreenLock.observeNow()`)
+    func begin(_ requested: RefreshScope, now: ContinuousClock.Instant, lock: () -> LockPeriods.Snapshot) -> SessionPlan {
         let scope = requested.effective(lastFullSweep: last, now: now)
-        let check: MissedCheck = switch requested.pids {
-            case _ where scope == requested: .off(.notWidened)
-            case nil: .off(.notWidened)
-            case _ where cleanEpoch == nil: .off(.noCleanSweep)
-            case _ where lock.isLocked || cleanEpoch != lock.epoch: .off(.screenLocked)
-            case let askedFor?: .on(askedFor: askedFor)
+        guard scope == .everything else { return .scoped(scope) }
+        let lock = lock()
+        guard scope != requested, let askedFor = requested.pids else {
+            return .fullSweep(widenedFrom: nil, check: .off(.notWidened), lockAtStart: lock)
         }
-        return SessionPlan(scope: scope, check: check, lockAtStart: lock)
+        let check: MissedCheck = if cleanEpoch == nil {
+            .off(.noCleanSweep)
+        } else if lock.isLocked || cleanEpoch != lock.epoch {
+            .off(.screenLocked)
+        } else {
+            .on
+        }
+        return .fullSweep(widenedFrom: askedFor, check: check, lockAtStart: lock)
     }
 
-    /// The session ended without being canceled: whether its notices are reported (see `MissedChanges.report(_:)`)
-    mutating func end(_ plan: SessionPlan, now: ContinuousClock.Instant, lock: LockPeriods.Snapshot) -> MissedCheck {
-        let isClean = !plan.lockAtStart.isLocked && !lock.isLocked && plan.lockAtStart.epoch == lock.epoch
-        if plan.scope == .everything {
-            last = now
-            cleanEpoch = isClean ? lock.epoch : nil
-        }
-        if case .on = plan.check, !isClean { return .off(.screenLocked) }
-        return plan.check
+    /// The session ended without being canceled. A full sweep: whether its notices are reported (see
+    /// `MissedChanges.report(_:to:)`). nil: a scoped session
+    mutating func end(_ plan: SessionPlan, now: ContinuousClock.Instant, lock: () -> LockPeriods.Snapshot) -> MissedCheck? {
+        guard case .fullSweep(_, let check, let lockAtStart) = plan else { return nil }
+        let lock = lock()
+        let isClean = !lockAtStart.isLocked && !lock.isLocked && lockAtStart.epoch == lock.epoch
+        last = now
+        cleanEpoch = isClean ? lock.epoch : nil
+        if check == .on && !isClean { return .off(.screenLocked) }
+        return check
     }
 }
 
 /// What a complete refresh session runs with (see `FullSweeps.begin(_:now:lock:)`)
-struct SessionPlan: Sendable, Equatable {
-    let scope: RefreshScope
-    let check: MissedCheck
-    let lockAtStart: LockPeriods.Snapshot
+enum SessionPlan: Sendable, Equatable {
+    /// Some apps, or the layout only: the last full sweep is recent
+    case scoped(RefreshScope)
+    /// Every app
+    /// - widenedFrom: the apps that the session was asked for, nil if every app
+    /// - lockAtStart: the lock state when it began
+    case fullSweep(widenedFrom: Set<pid_t>?, check: MissedCheck, lockAtStart: LockPeriods.Snapshot)
+
+    var scope: RefreshScope {
+        switch self {
+            case .scoped(let scope): scope
+            case .fullSweep: .everything
+        }
+    }
 }
 
-/// Whether a complete refresh session reports the changes of the apps that it wasn't asked for (see `FullSweeps`)
+/// Whether a full sweep reports the changes of the apps that it wasn't asked for (see `FullSweeps`)
 enum MissedCheck: Sendable, Equatable, CustomStringConvertible {
-    case on(askedFor: Set<pid_t>)
+    case on
     case off(Reason)
 
-    enum Reason: Sendable, Equatable {
-        /// The session asks what it was asked for: nothing beyond it
+    enum Reason: String, Sendable, Equatable {
+        /// Asked for every app: it finds nothing beyond what it was asked for
         case notWidened
-        /// No full sweep that wasn't behind a lock to compare with
+        /// No full sweep that the window server wasn't blind during, to compare with
         case noCleanSweep
-        /// The screen was locked since the last full sweep started, or during the session
+        /// The window server was blind since the last full sweep started, or during the session
         case screenLocked
     }
 
     var description: String {
         switch self {
             case .on: "on"
-            case .off(.notWidened): "off"
-            case .off(.noCleanSweep): "off(noCleanSweep)"
-            case .off(.screenLocked): "off(screenLocked)"
+            case .off(let reason): "off(\(reason.rawValue))"
         }
     }
 }
 
-/// The changes that a complete refresh session finds of the apps that it wasn't asked for (see `FullSweeps`). Collected
-/// during the session, decided once when it ends: the lock may come during it
+/// The changes that a full sweep finds of the apps that it wasn't asked for (see `FullSweeps`). Collected during the
+/// session whatever the check, decided once when it ends: the lock may come during it, and the suppressed ones are
+/// counted
 @MainActor
 final class MissedChanges {
-    private let check: MissedCheck
+    /// The apps that the session was asked for, nil: it collects nothing (a scoped session, a full sweep asked for every
+    /// app)
+    private let askedFor: Set<pid_t>?
     private(set) var notices: [String] = []
 
-    init(_ check: MissedCheck) { self.check = check }
+    init(_ plan: SessionPlan) {
+        askedFor = if case .fullSweep(let widenedFrom?, _, _) = plan { widenedFrom } else { nil }
+    }
 
     /// A change of the app with `pid`
     func note(_ pid: pid_t, _ change: @autoclosure () -> String) {
-        guard case .on(let askedFor) = check, !askedFor.contains(pid) else { return }
+        guard let askedFor, !askedFor.contains(pid) else { return }
         notices.append("\(change()) of \(MacApp.allAppsMap[pid]?.name ?? "\(pid)")")
     }
 
-    /// The session ended: logged as notices (kept) if `final` is on, the events of those apps need a look. Counted on the
-    /// perf line of the session either way
-    func report(_ final: MissedCheck) {
-        AxStats.session?.recordMissedCheck(final, notices: notices.count)
-        guard case .on = final else { return }
+    /// The session ended: logged as notices (kept) if `final` is on, the events of those apps need a look. A full sweep
+    /// counts them on its perf line either way
+    /// - Parameter final: see `FullSweeps.end(_:now:lock:)`, nil for a scoped session
+    func report(_ final: MissedCheck?, to cost: SessionAxCost) {
+        guard let final else { return }
+        cost.recordMissedCheck(final, notices: notices.count)
+        guard final == .on else { return }
         for notice in notices {
             perfLogger.notice("missed by the scoped refresh sessions: \(notice, privacy: .public)")
         }

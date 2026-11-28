@@ -18,12 +18,12 @@ struct TilingSlotTest {
     /// native fullscreen
     private func fullscreenRoundTrip(_ window: TestWindow, _ workspace: Workspace, meanwhile: () -> Void = {}) async throws {
         window.isMacosFullscreenForTest = true
-        try await normalizeLayoutReason()
+        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
         #expect(window.parent === workspace.macOsNativeFullscreenWindowsContainer)
         workspace.normalizeContainers()
         meanwhile()
         window.isMacosFullscreenForTest = false
-        try await normalizeLayoutReason()
+        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
         workspace.normalizeContainers()
     }
 
@@ -97,7 +97,7 @@ struct TilingSlotTest {
 
     private func setFullscreen(_ windows: [TestWindow], _ isFullscreen: Bool, _ workspace: Workspace) async throws {
         for window in windows { window.isMacosFullscreenForTest = isFullscreen }
-        try await normalizeLayoutReason()
+        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
         workspace.normalizeContainers()
     }
 
@@ -236,10 +236,10 @@ struct TilingSlotTest {
         }
         window2.bindToMacosNativeStateContainer(workspace.macOsNativeFullscreenWindowsContainer, adaptiveWeight: 1)
         window2.isMacosFullscreenForTest = true
-        try await normalizeLayoutReason() // layoutReason = .macos(prevParentKind: .macosFullscreenWindowsContainer)
+        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything))) // layoutReason = .macos(prevParentKind: .macosFullscreenWindowsContainer)
         workspace.normalizeContainers()
         window2.isMacosFullscreenForTest = false
-        try await normalizeLayoutReason()
+        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
         assertEquals(root.layoutDescription, .h_tiles([.window(1), .window(2), .window(3)]))
 
         // The command exits fullscreen before the native state is detected
