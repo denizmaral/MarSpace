@@ -13,21 +13,21 @@ import CoreGraphics
 /// notifications of the unlock and of the wake read the truth again (awake isn't unlocked). The frontmost app isn't it:
 /// a lock after the displays went to sleep doesn't activate the lock screen
 @MainActor
-final class ScreenLock {
-    static let shared = ScreenLock(readsWindowServer: ScreenLock.isWindowServerBlind)
-    private var periods = LockPeriods()
+final class WindowServerBlindness {
+    static let shared = WindowServerBlindness(readsWindowServer: WindowServerBlindness.isWindowServerBlind)
+    private var periods = BlindPeriods()
     private let readsWindowServer: () -> Bool
 
     init(readsWindowServer: @escaping () -> Bool) { self.readsWindowServer = readsWindowServer }
 
     /// Reads the window server: the state now
-    func observeNow() -> LockPeriods.Snapshot {
+    func observeNow() -> BlindPeriods.Snapshot {
         let state = signposter.beginInterval(#function)
         defer { signposter.endInterval(#function, state) }
         return observe(isBlind: readsWindowServer())
     }
 
-    func handle(_ event: LockEvent) {
+    func handle(_ event: BlindnessEvent) {
         switch event {
             case .blind: _ = observe(isBlind: true) // Whatever the window server says yet: the period begins
             case .mayBeBack: _ = observeNow()
@@ -36,25 +36,25 @@ final class ScreenLock {
 
     func observeNotifications() {
         let distributed = DistributedNotificationCenter.default()
-        for (name, event) in [(Self.screenIsLocked, LockEvent.blind), (Self.screenIsUnlocked, .mayBeBack)] {
+        for (name, event) in [(Self.screenIsLocked, BlindnessEvent.blind), (Self.screenIsUnlocked, .mayBeBack)] {
             distributed.addObserver(forName: name, object: nil, queue: .main) { _ in
-                MainActor.assumeIsolated { ScreenLock.shared.handle(event) }
+                MainActor.assumeIsolated { WindowServerBlindness.shared.handle(event) }
             }
         }
         let workspace = NSWorkspace.shared.notificationCenter
-        let events: [(Notification.Name, LockEvent)] = [
+        let events: [(Notification.Name, BlindnessEvent)] = [
             (NSWorkspace.willSleepNotification, .blind), (NSWorkspace.didWakeNotification, .mayBeBack),
             (NSWorkspace.screensDidSleepNotification, .blind), (NSWorkspace.screensDidWakeNotification, .mayBeBack),
             (NSWorkspace.sessionDidResignActiveNotification, .blind), (NSWorkspace.sessionDidBecomeActiveNotification, .mayBeBack),
         ]
         for (name, event) in events {
             workspace.addObserver(forName: name, object: nil, queue: .main) { _ in
-                MainActor.assumeIsolated { ScreenLock.shared.handle(event) }
+                MainActor.assumeIsolated { WindowServerBlindness.shared.handle(event) }
             }
         }
     }
 
-    private func observe(isBlind: Bool) -> LockPeriods.Snapshot {
+    private func observe(isBlind: Bool) -> BlindPeriods.Snapshot {
         let before = periods.epoch
         let snapshot = periods.observe(isBlind: isBlind)
         if snapshot.epoch != before { perfLogger.notice("lock period \(snapshot.epoch) began: the windows aren't comparable across it") }
@@ -83,16 +83,16 @@ final class ScreenLock {
     }
 }
 
-/// What a notification says about the window server (see `ScreenLock.handle(_:)`)
-enum LockEvent: Sendable {
+/// What a notification says about the window server (see `WindowServerBlindness.handle(_:)`)
+enum BlindnessEvent: Sendable {
     /// The screen locks, the displays or the Mac go to sleep, the session leaves the console
     case blind
     /// The opposite: it may be back, the window server tells
     case mayBeBack
 }
 
-/// The periods while the window server is blind (see `ScreenLock`)
-struct LockPeriods: Sendable {
+/// The periods while the window server is blind (see `WindowServerBlindness`)
+struct BlindPeriods: Sendable {
     /// Counts the periods: it changes once when one begins
     private(set) var epoch: UInt64 = 0
     private var isBlind = false

@@ -133,7 +133,7 @@ extension RefreshScope {
 /// The complete refresh sessions that asked every app (full sweeps). A session that was asked for some apps asks every
 /// app when the last full sweep is too long ago (see `RefreshScope.effective(lastFullSweep:now:)`). What it finds of the
 /// other apps wasn't notified by them: it would have been missed without the full sweep, it's reported (see
-/// `MissedChanges`). Unless the window server was blind (see `ScreenLock`) since the last full sweep started, or during
+/// `MissedChanges`). Unless the window server was blind (see `WindowServerBlindness`) since the last full sweep started, or during
 /// the session: the windows come back after the unlock, and the apps don't notify about it.
 ///
 /// The lock state is read only by full sweeps: the scoped sessions decide nothing with it
@@ -145,8 +145,8 @@ struct FullSweeps: Sendable {
 
     /// A session begins: its scope, and for a full sweep whether it reports what it finds of the apps that it wasn't
     /// asked for
-    /// - Parameter lock: reads the lock state (see `ScreenLock.observeNow()`)
-    func begin(_ requested: RefreshScope, now: ContinuousClock.Instant, lock: () -> LockPeriods.Snapshot) -> SessionPlan {
+    /// - Parameter lock: reads the lock state (see `WindowServerBlindness.observeNow()`)
+    func begin(_ requested: RefreshScope, now: ContinuousClock.Instant, lock: () -> BlindPeriods.Snapshot) -> SessionPlan {
         let scope = requested.effective(lastFullSweep: last, now: now)
         switch scope {
             case .layout: return .layout
@@ -155,7 +155,7 @@ struct FullSweeps: Sendable {
         }
         let lock = lock()
         guard scope != requested, let askedFor = requested.pids else {
-            return .fullSweep(widenedFrom: nil, check: .off(.notWidened), lockAtStart: lock)
+            return .fullSweep(widenedFrom: nil, check: .off(.notWidened), blindAtStart: lock)
         }
         let check: MissedCheck = if cleanEpoch == nil {
             .off(.noCleanSweep)
@@ -164,15 +164,15 @@ struct FullSweeps: Sendable {
         } else {
             .on
         }
-        return .fullSweep(widenedFrom: askedFor, check: check, lockAtStart: lock)
+        return .fullSweep(widenedFrom: askedFor, check: check, blindAtStart: lock)
     }
 
     /// The session ended without being canceled. A full sweep: whether its notices are reported (see
     /// `MissedChanges.report(_:to:)`). nil: a scoped session
-    mutating func end(_ plan: SessionPlan, now: ContinuousClock.Instant, lock: () -> LockPeriods.Snapshot) -> MissedCheck? {
-        guard case .fullSweep(_, let check, let lockAtStart) = plan else { return nil }
+    mutating func end(_ plan: SessionPlan, now: ContinuousClock.Instant, lock: () -> BlindPeriods.Snapshot) -> MissedCheck? {
+        guard case .fullSweep(_, let check, let blindAtStart) = plan else { return nil }
         let lock = lock()
-        let isClean = !lockAtStart.isBlind && !lock.isBlind && lockAtStart.epoch == lock.epoch
+        let isClean = !blindAtStart.isBlind && !lock.isBlind && blindAtStart.epoch == lock.epoch
         last = now
         cleanEpoch = isClean ? lock.epoch : nil
         if check == .on && !isClean { return .off(.windowServerBlind) }
@@ -188,8 +188,8 @@ enum SessionPlan: Sendable, Equatable {
     case apps(Set<pid_t>)
     /// Every app
     /// - widenedFrom: the apps that the session was asked for, nil if every app
-    /// - lockAtStart: the lock state when it began
-    case fullSweep(widenedFrom: Set<pid_t>?, check: MissedCheck, lockAtStart: LockPeriods.Snapshot)
+    /// - blindAtStart: the lock state when it began
+    case fullSweep(widenedFrom: Set<pid_t>?, check: MissedCheck, blindAtStart: BlindPeriods.Snapshot)
 
     var scope: RefreshScope {
         switch self {
@@ -233,11 +233,14 @@ final class MissedChanges {
     private(set) var notices: [String] = []
 
     /// Outside of a complete refresh session (the tests): nothing is collected
-    static var notCollected: MissedChanges { MissedChanges(.layout) }
+    static var notCollected: MissedChanges { MissedChanges(askedFor: nil) }
 
-    init(_ plan: SessionPlan) {
-        askedFor = if case .fullSweep(let widenedFrom?, _, _) = plan { widenedFrom } else { nil }
+    convenience init(_ plan: SessionPlan) {
+        let askedFor: Set<pid_t>? = if case .fullSweep(let widenedFrom?, _, _) = plan { widenedFrom } else { nil }
+        self.init(askedFor: askedFor)
     }
+
+    private init(askedFor: Set<pid_t>?) { self.askedFor = askedFor }
 
     /// A change of the app with `pid`
     func note(_ pid: pid_t, _ change: @autoclosure () -> String) {

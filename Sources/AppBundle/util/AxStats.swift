@@ -182,10 +182,15 @@ final class SessionAxCost: Sendable {
 
 extension SessionAxCost {
     /// The fields of the perf line of a full sweep: whether it reported the changes of the apps that it wasn't asked for,
-    /// and how many it found. Not reported (the window server was blind): suppressed. Empty for a scoped session
+    /// and how many it found. Not reported (the window server was blind): suppressed. No count for a sweep asked for every app
+    /// (it collects nothing), empty for a scoped session
     static func missedCheckFields(_ missed: (check: MissedCheck, notices: Int)?) -> String {
         guard let missed else { return "" }
-        return " missedCheck=\(missed.check) \(missed.check == .on ? "missed" : "missedSuppressed")=\(missed.notices)"
+        return switch missed.check {
+            case .on: " missedCheck=on missed=\(missed.notices)"
+            case .off(.notWidened): " missedCheck=\(missed.check)" // It collects nothing
+            case .off: " missedCheck=\(missed.check) missedSuppressed=\(missed.notices)"
+        }
     }
 }
 

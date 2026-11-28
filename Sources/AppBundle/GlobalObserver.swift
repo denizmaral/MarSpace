@@ -84,7 +84,7 @@ enum GlobalObserver {
     @MainActor
     static func initObserver() {
         RunningApps.onChange = onAppChange
-        ScreenLock.shared.observeNotifications()
+        WindowServerBlindness.shared.observeNotifications()
         let nc = NSWorkspace.shared.notificationCenter
         nc.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main, using: onNotif)
         nc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main, using: onNotif)
