@@ -71,6 +71,10 @@ Checklist for a new command (from `dev-docs/architecture.md`):
 Everything runs on `@MainActor`. Use `Task.startUnstructured`, never `Task {}` or `Task.init`; `lint.sh` enforces this.
 - **`runLightSession`**: wraps each CLI command and hotkey. It refreshes the model, runs the body, lays out workspaces, syncs focus to macOS, then schedules a heavy refresh.
 - **`runHeavyCompleteRefreshSession`**: triggered by accessibility observer events (`GlobalObserver.swift`). It detects new or closed windows, normalizes, and lays out.
+- **`RefreshScope`** (`layout/RefreshScope.swift`): what a heavy session asks the apps.
+  - An accessibility notification asks only its app (`.apps`), and a window's size read-back only lays out (`.layout`). Everything else asks every app (`.everything`), and so does any session more than 5 s after the last full one (`fullSweepInterval`).
+  - The scopes of a burst, and of a session canceled by a light one, are merged (`SessionQueue`).
+  - A full sweep after scoped sessions logs every change of another app as a `perf` notice ("missed by the scoped refresh sessions"). The perf line has `scope=`, `apps=asked/running` and `nativeStates=`.
 
 Async functions take a `CancellationMode` (`.cancellable` / `.nonCancellable`). The `_nonCancellable` suffix marks functions that must not be cancelled. Use `die`/`check` for invariants.
 

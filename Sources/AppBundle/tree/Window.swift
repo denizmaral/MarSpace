@@ -293,7 +293,7 @@ open class Window: TreeNode, Hashable {
             guard inARow < Self.maxLayoutRequestsAfterReadBack else { return }
             layoutRequestsAfterReadBack = (inARow + 1, now)
         }
-        scheduleCancellableCompleteRefreshSession(.frameReadBack)
+        scheduleCancellableCompleteRefreshSession(.frameReadBack, scope: .layout) // Only the layout changes
     }
 
     /// A fitting longer than this is logged as an error: the app was slow to answer its asks

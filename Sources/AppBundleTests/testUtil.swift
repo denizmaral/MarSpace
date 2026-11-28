@@ -87,6 +87,7 @@ func setUpWorkspacesForTests() {
     WindowDrag.shared.end()
     dwindleSplitQueue = []
     completeRefreshSessionsAskedForInTests = []
+    completeRefreshScopesAskedForInTests = []
 }
 
 extension ParsedCmd {

@@ -1,7 +1,11 @@
+import AppKit
+
 /// The last time when the native state of the windows of invisible workspaces was checked. See normalizeLayoutReason
 @MainActor var lastInvisibleWindowsNativeStateCheck: ContinuousClock.Instant? = nil
 
-@MainActor func normalizeLayoutReason() async throws {
+/// - Parameter pids: the apps of the session, nil: every app (see `RefreshScope.readsNativeState`)
+/// - Parameter missedOutside: see `logMissedChange(_:_:missedOutside:)`
+@MainActor func normalizeLayoutReason(_ pids: Set<pid_t>? = nil, missedOutside: Set<pid_t>? = nil) async throws {
     // Windows of invisible workspaces are hidden in the corner of the screen, their native state rarely changes. Saves
     // 2 AX calls per window per refresh session. They are checked:
     // - when AX notifies about a native state change (e.g. "Minimize All"), see refreshObs, or AeroSpace changes it
@@ -10,25 +14,39 @@
     // The timestamp is recorded before the checks: sessions are often canceled by newer events, a timestamp recorded
     // after the checks would never be recorded during bursts of events. Notified windows are checked anyway
     let now = ContinuousClock.now
-    let checkInvisible = lastInvisibleWindowsNativeStateCheck.map { now - $0 >= .seconds(5) } ?? true
+    // A session of some apps doesn't check the windows of invisible workspaces: the next one of every app does
+    let checkInvisible = pids == nil && (lastInvisibleWindowsNativeStateCheck.map { now - $0 >= .seconds(5) } ?? true)
     if checkInvisible { lastInvisibleWindowsNativeStateCheck = now }
+    var read = 0
+    defer { AxStats.session?.recordNativeStateReads(read) }
     for workspace in Workspace.all {
-        let windows: [Window] = workspace.isVisible || checkInvisible
-            ? workspace.allLeafWindowsRecursive
-            : workspace.allLeafWindowsRecursive.filter { $0.layoutReason != .standard || $0.isNativeStateCheckRequested }
+        let isVisible = workspace.isVisible
+        let windows = workspace.allLeafWindowsRecursive.filter {
+            RefreshScope.readsNativeState(
+                of: $0.app.pid,
+                in: pids,
+                isWorkspaceVisible: isVisible,
+                checksInvisible: checkInvisible,
+                isInNativeState: $0.layoutReason != .standard,
+                isCheckRequested: $0.isNativeStateCheckRequested,
+            )
+        }
         if windows.isEmpty { continue }
+        read += windows.count
         // Clear the requests before the AX reads: a notification during the reads requests a new check
         let requested = windows.filter(\.isNativeStateCheckRequested)
         for window in requested { window.isNativeStateCheckRequested = false }
         do {
-            try await _normalizeLayoutReason(workspace: workspace, windows: windows)
+            try await _normalizeLayoutReason(workspace: workspace, windows: windows, missedOutside: missedOutside)
         } catch {
             for window in requested { window.isNativeStateCheckRequested = true } // Not checked, e.g. the session is canceled
             throw error
         }
     }
-    try await _normalizeLayoutReason(workspace: globalFocus.workspace, windows: macosMinimizedWindowsContainer.children.filterIsInstance(of: Window.self))
-    try await validateStillPopups()
+    let minimized = macosMinimizedWindowsContainer.children.filterIsInstance(of: Window.self)
+    read += minimized.count
+    try await _normalizeLayoutReason(workspace: globalFocus.workspace, windows: minimized, missedOutside: missedOutside)
+    try await validateStillPopups(pids)
 }
 
 @MainActor private var popupRecheckTask: Task<(), any Error>? = nil
@@ -47,9 +65,11 @@
     }
 }
 
-@MainActor private func validateStillPopups() async throws {
+/// - Parameter pids: the apps of the session, nil: every app
+@MainActor private func validateStillPopups(_ pids: Set<pid_t>?) async throws {
     for node in macosPopupWindowsContainer.children {
         let popup = (node as! MacWindow)
+        if let pids, !pids.contains(popup.macApp.pid) { continue }
         let windowLevel = try await popup.getWindowLevel(.cancellable)
         if try await popup.isWindowHeuristic(windowLevel, .cancellable) {
             let dwindleSplit = try await popup.relayoutWindowDeferringDwindleSplit(on: globalFocus.workspace, .cancellable)
@@ -60,7 +80,7 @@
     }
 }
 
-@MainActor private func _normalizeLayoutReason(workspace: Workspace, windows: [Window]) async throws {
+@MainActor private func _normalizeLayoutReason(workspace: Workspace, windows: [Window], missedOutside: Set<pid_t>?) async throws {
     let states = try await windows.mapConcurrently { try await $0.getMacosWindowNativeState(.cancellable) }
     for (window, state) in zip(windows, states) {
         let isMacosFullscreen = state == .nativeFullscreen
@@ -79,6 +99,12 @@
         if case .macos = window.layoutReason, isTilingOrFloating {
             window.layoutReason = .standard
             window.tilingSlot = nil // The place that it left for the native state: it has another one now
+        }
+        let wasStandard = window.layoutReason == .standard
+        defer {
+            if (window.layoutReason == .standard) != wasStandard {
+                logMissedChange(window.app.pid, "window \(window.windowId) \(wasStandard ? "entered" : "left") a native state", missedOutside: missedOutside)
+            }
         }
         switch window.layoutReason {
             case .standard:

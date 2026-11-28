@@ -8,7 +8,7 @@ import Common
 ///   move drops the session of the previous one)
 /// - Light sessions wait in their order, before a heavy one that waits. A light session that comes while a heavy one runs
 ///   cancels it (a canceled wait for an app returns right away), the heavy one runs again after it
-/// - Heavy sessions are asked for with an event (see ``scheduleHeavy(_:optimisticallyPreLayoutWorkspaces:)``): one at
+/// - Heavy sessions are asked for with an event (see ``scheduleHeavy(_:scope:optimisticallyPreLayoutWorkspaces:)``): one at
 ///   a time. A burst of events is one session, `debounce` after the last event, but not later than `maxWait` after the
 ///   first one (a window that keeps moving doesn't hold it off forever). The events that come while it runs don't cancel
 ///   it: one more session follows, with the last event
@@ -19,8 +19,8 @@ import Common
 /// than `slowWait` is logged as an error, with the session that held the queue
 @MainActor
 final class SessionQueue {
-    static let shared = SessionQueue(debounce: .milliseconds(16), maxWait: .milliseconds(100)) { event, preLayout in
-        await runHeavyCompleteRefreshSession(event, assumeCancellable: true, optimisticallyPreLayoutWorkspaces: preLayout)
+    static let shared = SessionQueue(debounce: .milliseconds(16), maxWait: .milliseconds(100)) { event, preLayout, scope in
+        await runHeavyCompleteRefreshSession(event, scope: scope, assumeCancellable: true, optimisticallyPreLayoutWorkspaces: preLayout)
     }
 
     enum Kind: Sendable {
@@ -50,7 +50,7 @@ final class SessionQueue {
     private let debounce: Duration
     private let maxWait: Duration
     private let slowWait: Duration
-    private let runHeavy: @MainActor (RefreshSessionEvent, Bool) async -> Void
+    private let runHeavy: @MainActor (RefreshSessionEvent, Bool, RefreshScope) async -> Void
 
     private struct Holder {
         let id: UInt64
@@ -74,6 +74,8 @@ final class SessionQueue {
     private struct HeavyRequest {
         var event: RefreshSessionEvent
         var preLayout: Bool
+        /// Of all the events that it stands for (see RefreshScope)
+        var scope: RefreshScope
         var coalesced: Int
         let firstAskedAt: ContinuousClock.Instant
         var isRerun: Bool
@@ -90,7 +92,7 @@ final class SessionQueue {
         debounce: Duration,
         maxWait: Duration,
         slowWait: Duration = MacApp.answerDeadline,
-        runHeavy: @escaping @MainActor (RefreshSessionEvent, Bool) async -> Void,
+        runHeavy: @escaping @MainActor (RefreshSessionEvent, Bool, RefreshScope) async -> Void,
     ) {
         self.debounce = debounce
         self.maxWait = maxWait
@@ -170,14 +172,15 @@ final class SessionQueue {
 
     // MARK: Heavy sessions
 
-    func scheduleHeavy(_ event: RefreshSessionEvent, optimisticallyPreLayoutWorkspaces preLayout: Bool = false) {
+    func scheduleHeavy(_ event: RefreshSessionEvent, scope: RefreshScope = .everything, optimisticallyPreLayoutWorkspaces preLayout: Bool = false) {
         if var request = pendingHeavy {
             request.event = event // The last event
             request.preLayout = request.preLayout || preLayout
+            request.scope = request.scope.union(scope) // What any of the events may have changed
             request.coalesced += 1
             pendingHeavy = request
         } else {
-            pendingHeavy = HeavyRequest(event: event, preLayout: preLayout, coalesced: 1, firstAskedAt: .now, isRerun: heavyTask != nil)
+            pendingHeavy = HeavyRequest(event: event, preLayout: preLayout, scope: scope, coalesced: 1, firstAskedAt: .now, isRerun: heavyTask != nil)
         }
         // A heavy session that waits for the queue takes the request when it gets it, one that runs is followed by one
         if heavyTask == nil { armHeavyTimer() }
@@ -212,7 +215,7 @@ final class SessionQueue {
                     coalesced: request.coalesced,
                     isRerun: request.isRerun,
                 )) {
-                    await self.runHeavy(request.event, request.preLayout)
+                    await self.runHeavy(request.event, request.preLayout, request.scope)
                 }
             }
             self.heavyDidEnd()
@@ -228,9 +231,10 @@ final class SessionQueue {
         if wasPreempted, let ended { // Canceled by a light session: again, after it
             if var request = pendingHeavy {
                 request.preLayout = request.preLayout || ended.preLayout
+                request.scope = request.scope.union(ended.scope) // What the canceled one didn't see yet
                 pendingHeavy = request
             } else {
-                pendingHeavy = HeavyRequest(event: ended.event, preLayout: ended.preLayout, coalesced: 1, firstAskedAt: .now, isRerun: true)
+                pendingHeavy = HeavyRequest(event: ended.event, preLayout: ended.preLayout, scope: ended.scope, coalesced: 1, firstAskedAt: .now, isRerun: true)
             }
         }
         if pendingHeavy != nil { armHeavyTimer() } // The events that came while it ran

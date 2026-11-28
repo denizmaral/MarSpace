@@ -341,8 +341,11 @@ final class MacApp: AbstractApp {
         return try await AppBundle::getWindowLevel(forNativeId: nativeWindowId, cm)
     }
 
+    /// - Parameter pids: the apps that are asked for their windows, nil: every app, also the apps that aren't registered
+    ///   yet. The windows of the others are what MarSpace knows of them (see `RefreshScope`)
     @MainActor static func refreshAllAndGetAliveWindowIds(
         frontmostAppBundleId: String?,
+        only pids: Set<pid_t>? = nil,
     ) async throws -> [MacApp: [OpaqueWindowId: WindowLifeStatus]] {
         for app in MacApp.allAppsMap.values { // gc dead apps
             try checkCancellation()
@@ -350,20 +353,26 @@ final class MacApp: AbstractApp {
                 await app.destroy()
             }
         }
+        var asked = 0
+        defer { AxStats.session?.recordAppsAsked(asked, of: RunningApps.regular.count) }
         return try await withThrowingTaskGroup(
             of: (MainActorRef<MacApp>, [OpaqueWindowId: WindowLifeStatus])?.self,
             returning: [MacApp: [OpaqueWindowId: WindowLifeStatus]].self,
         ) { group in
             @MainActor func refreshTheApp(_ app: MacApp) {
+                asked += 1
                 let app = MainActorRef(app)
                 group.addTask { @Sendable @MainActor in
                     return (app, try await app.value.aliveWindowIdsOrKnown(frontmostAppBundleId: frontmostAppBundleId))
                 }
             }
+            var result: [MacApp: [OpaqueWindowId: WindowLifeStatus]] = [:]
             // Register new apps, each one in its own task: an app that doesn't answer doesn't hold up the others (see
-            // registerWithinDeadline)
-            for running in RunningApps.regular {
+            // registerWithinDeadline). A new app launches: an event that asks every app
+            for running in RunningApps.regular where pids?.contains(running.pid) ?? true {
                 try checkCancellation()
+                if pids != nil, MacApp.allAppsMap[running.pid] != nil { continue } // Refreshed below
+                asked += 1
                 let running = MainActorRef(running)
                 group.addTask { @Sendable @MainActor in
                     guard let app = try await MacApp.registerWithinDeadline(running.value, .cancellable) else { return nil }
@@ -372,14 +381,15 @@ final class MacApp: AbstractApp {
             }
             for app in MacApp.allAppsMap.values {
                 try checkCancellation()
-                // "About this Mac" window, TouchID, and a lot of other utility windows
-                // We don't monitor them actively as we do for regular apps, but if a window of one of those utility
-                // apps got focused it will end up in allAppsMap
-                if app.nsApp.activationPolicy != .regular {
+                if let pids {
+                    if pids.contains(app.pid) { refreshTheApp(app) } else { result[app] = app.knownWindows }
+                } else if app.nsApp.activationPolicy != .regular {
+                    // "About this Mac" window, TouchID, and a lot of other utility windows
+                    // We don't monitor them actively as we do for regular apps, but if a window of one of those utility
+                    // apps got focused it will end up in allAppsMap
                     refreshTheApp(app)
                 }
             }
-            var result: [MacApp: [OpaqueWindowId: WindowLifeStatus]] = [:]
             for try await case let (macAppRef, windowIds)? in group {
                 result[macAppRef.value] = windowIds
             }
@@ -516,7 +526,7 @@ final class MacApp: AbstractApp {
         deadline: Self.answerDeadline,
         appName: { [weak self] in self.map { $0.name ?? "pid \($0.pid)" } ?? "an app that quit" },
         probe: { [weak self] in self?.startProbe() },
-        didRecover: { scheduleCancellableCompleteRefreshSession(.appAnswered) },
+        didRecover: { [pid] in scheduleCancellableCompleteRefreshSession(.appAnswered, scope: .app(pid)) },
     )
 
     /// The apps that launched and weren't registered within ``answerDeadline`` (their accessibility subscriptions): a
@@ -578,7 +588,7 @@ final class MacApp: AbstractApp {
                 Task.startUnstructured { @MainActor in
                     defer { lateRegistrations.remove(pid) }
                     // The registration that is under way (see wipPids)
-                    if (try? await getOrRegister(runningRef.value)) != nil { scheduleCancellableCompleteRefreshSession(.appAnswered) }
+                    if (try? await getOrRegister(runningRef.value)) != nil { scheduleCancellableCompleteRefreshSession(.appAnswered, scope: .app(pid)) }
                 }
                 return nil
         }
