@@ -379,10 +379,16 @@ final class MacApp: AbstractApp {
                     return (MainActorRef(app), try await app.aliveWindowIdsOrKnown(frontmostAppBundleId: frontmostAppBundleId))
                 }
             }
+            // The apps that aren't asked keep the windows that MarSpace knows of them: gathered in one pass
+            if pids != nil {
+                for window in MacWindow.allWindowsMap.values where !(pids?.contains(window.macApp.pid) ?? true) {
+                    result[window.macApp, default: [:]][window.windowId] = window.lifeStatus
+                }
+            }
             for app in MacApp.allAppsMap.values {
                 try checkCancellation()
                 if let pids {
-                    if pids.contains(app.pid) { refreshTheApp(app) } else { result[app] = app.knownWindows }
+                    if pids.contains(app.pid) { refreshTheApp(app) } else if result[app] == nil { result[app] = [:] } // No windows
                 } else if app.nsApp.activationPolicy != .regular {
                     // "About this Mac" window, TouchID, and a lot of other utility windows
                     // We don't monitor them actively as we do for regular apps, but if a window of one of those utility
