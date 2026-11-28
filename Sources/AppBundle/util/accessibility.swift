@@ -364,6 +364,19 @@ extension AXUIElement: AxUiElementMock {
             : nil
     }
 
+    /// Two attributes in one round trip to the app (`AXUIElementCopyMultipleAttributeValues`), instead of two (see
+    /// `AxStats`). Each one is nil if the app doesn't have it, as with `get(_:)`
+    func get<A: ReadableAttr, B: ReadableAttr>(_ a: A, _ b: B) -> (A.T?, B.T?) {
+        let state = signposter.beginInterval(#function, "attrs: \(a.key) \(b.key) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
+        defer { signposter.endInterval(#function, state) }
+        AxStats.record(.batchedRead(attributes: 2))
+        var raw: CFArray?
+        guard unsafe AXUIElementCopyMultipleAttributeValues(self, [a.key, b.key] as CFArray, [], &raw) == .success,
+              let values = raw as [AnyObject]?, values.count == 2
+        else { return (nil, nil) }
+        return (attributeValue(values[0]).flatMap(a.getter), attributeValue(values[1]).flatMap(b.getter))
+    }
+
     @discardableResult func set<Attr: WritableAttr>(_ attr: Attr, _ value: Attr.T) -> Bool {
         if serverArgs.isReadOnly { return false }
         let state = signposter.beginInterval(#function, "attr: \(attr.key) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
@@ -395,6 +408,14 @@ extension AXUIElement: AxUiElementMock {
         var pid: pid_t = 0
         return unsafe AXUIElementGetPid(self, &pid) == .success ? pid : nil
     }
+}
+
+/// A value of `AXUIElementCopyMultipleAttributeValues`: an attribute that the element doesn't have is an error value
+/// in the array (the getters of the attributes don't take it)
+func attributeValue(_ value: AnyObject) -> AnyObject? {
+    if value is NSNull { return nil }
+    if CFGetTypeID(value) == AXValueGetTypeID(), AXValueGetType(unsafe unsafeDowncast(value, to: AXValue.self)) == .axError { return nil }
+    return value
 }
 
 extension AXObserver {

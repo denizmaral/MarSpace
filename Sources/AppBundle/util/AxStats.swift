@@ -17,6 +17,8 @@ enum AxStats {
     enum Call {
         /// An attribute, the window of an element, the element at a position
         case read
+        /// Several attributes in one round trip (see `AXUIElement.get(_:_:)`): a read, and the reads that it saves
+        case batchedRead(attributes: Int)
         /// An attribute
         case write
         /// E.g. raise a window, press its close button
@@ -30,12 +32,17 @@ enum AxStats {
         var writes: Int = 0
         var actions: Int = 0
         var observers: Int = 0
+        /// The reads that batched reads saved (see `Call.batchedRead(attributes:)`), not in `total`
+        var readsSaved: Int = 0
 
         var total: Int { reads + writes + actions + observers }
 
         mutating func record(_ call: Call) {
             switch call {
                 case .read: reads += 1
+                case .batchedRead(let attributes):
+                    reads += 1
+                    readsSaved += attributes - 1
                 case .write: writes += 1
                 case .action: actions += 1
                 case .observer: observers += 1
@@ -143,7 +150,7 @@ final class SessionAxCost: Sendable {
         let refresh = (apps.map { " apps=\($0.asked)/\($0.of)" } ?? "") + (nativeStates.map { " nativeStates=\($0)" } ?? "")
         let fitting = fittings == 0 ? "" : " sizeFittings=\(fittings) sizeFittingAsks=\(fittingAsks) sizeFittingMs=\(fittingDuration.milliseconds)"
         perfLogger.debug(
-            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public)\(refresh, privacy: .public)\(fitting, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
+            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axReadsSaved=\(ax.readsSaved) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public)\(refresh, privacy: .public)\(fitting, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
         )
     }
 }
