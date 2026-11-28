@@ -4,10 +4,15 @@ import Common
 /// Alternative name: AttrAddressibleStorage
 protocol AxUiElementMock {
     func get<Attr: ReadableAttr>(_ attr: Attr) -> Attr.T?
+    /// Several attributes at once: one round trip to the app for an `AXUIElement` (see `AxStats`). Each one is nil if
+    /// the element doesn't have it, as with `get(_:)`
+    func getAll<each Attr: ReadableAttr>(_ attrs: repeat each Attr) -> (repeat (each Attr).T?)
     func containingNativeWindowId() -> CGWindowID?
 }
 
 extension AxUiElementMock {
+    func getAll<each Attr: ReadableAttr>(_ attrs: repeat each Attr) -> (repeat (each Attr).T?) { (repeat get(each attrs)) }
+
     var cast: AXUIElement { self as! AXUIElement }
 
     /// The window that the sheet is attached to (also a sheet over a sheet). nil: the element isn't a sheet, or it

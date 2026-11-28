@@ -2,7 +2,7 @@ import AppKit
 import Common
 
 /// What a complete refresh session asks the apps (see `runHeavyCompleteRefreshSession`). Every app is an IPC round trip
-/// that wakes up its main thread: the list of its windows, the native state of each window that is shown (2 reads). An
+/// that wakes up its main thread: the list of its windows, the native state of each window that is shown (one more). An
 /// accessibility notification of one app says that the windows of that app may have changed, not the others: its session
 /// asks only that app. A window that answered its size changes only the layout.
 ///

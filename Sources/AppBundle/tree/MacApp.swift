@@ -327,13 +327,7 @@ final class MacApp: AbstractApp {
     @MainActor
     func getMacosWindowNativeState(_ windowId: OpaqueWindowId, _ cm: CancellationMode) async throws -> MacosWindowNativeState? {
         try await answer(cm, orElse: { _ in (Window.get(byId: windowId) as? MacWindow).map(\.nativeStateAsKnown) }) {
-            try await $0.withWindow(windowId, cm) { window, job in
-                // One round trip for both
-                let (isFullscreen, isMinimized) = window.get(Ax.isFullscreenAttr, Ax.minimizedAttr)
-                if isFullscreen == true { return .nativeFullscreen }
-                if isMinimized == true { return .nativeMinimized }
-                return .normal
-            }
+            try await $0.withWindow(windowId, cm) { window, _ in nativeState(of: window) }
         }
     }
 
@@ -684,9 +678,21 @@ extension Dictionary where Key == UInt32 {
 
 private func getAxRect(window: AXUIElement, job: RunLoopJob) throws -> Rect? {
     try job.checkCancellation()
-    // One round trip: the position and the size of the same moment
-    guard case let (topLeftCorner?, size?) = window.get(Ax.topLeftCornerAttr, Ax.sizeAttr) else { return nil }
+    return axRect(of: window)
+}
+
+/// The frame of the window: its position and size, in one round trip to the app
+func axRect(of window: some AxUiElementMock) -> Rect? {
+    guard case let (topLeftCorner?, size?) = window.getAll(Ax.topLeftCornerAttr, Ax.sizeAttr) else { return nil }
     return Rect(topLeftX: topLeftCorner.x, topLeftY: topLeftCorner.y, width: size.width, height: size.height)
+}
+
+/// The native state of the window: fullscreen and minimized, in one round trip to the app
+func nativeState(of window: some AxUiElementMock) -> MacosWindowNativeState {
+    let (isFullscreen, isMinimized) = window.getAll(Ax.isFullscreenAttr, Ax.minimizedAttr)
+    if isFullscreen == true { return .nativeFullscreen }
+    if isMinimized == true { return .nativeMinimized }
+    return .normal
 }
 
 private enum FrameJobResult: Sendable {
