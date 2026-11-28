@@ -685,4 +685,26 @@ struct RefusedTileSizeTest {
         assertEquals(window.fit(forTile: tileSize)?.height, .fits)
         assertEquals(layoutsAskedForByReadBacks, 0)
     }
+
+    /// Only fittings in a row that ask again count: one that the window answers as known starts the count over
+    @Test func testAnswerAsKnownStartsTheRefitsOver() async throws {
+        setGaps(inner: 10, outer: (10, 10, 10, 13))
+        let workspace = Workspace.get(byName: name)
+        let terminal = TestWindow.new(id: 1, parent: workspace.rootTilingContainer) // A tile of 1900x1056
+        terminal.characterGridForTest = CGSize(width: 1, height: 14)
+        let tileSize = CGSize(width: 1900, height: 1056)
+        func layout(frameAnswersALineMore: Bool) async throws {
+            terminal.frameAnswersALineMoreForTest = frameAnswersALineMore
+            terminal.invalidateSentFrame()
+            try await workspace.layoutWorkspace()
+        }
+        try await layout(frameAnswersALineMore: true) // Asked for less
+        try await layout(frameAnswersALineMore: true) // Asked for the tile again
+        let asks = terminal.sizeAsksForTest.count
+        try await layout(frameAnswersALineMore: false) // Answered as known
+        assertEquals(terminal.sizeAsksForTest.count, asks)
+        try await layout(frameAnswersALineMore: true) // Asked again: the first one in a row
+        assertEquals(terminal.searchesFit(inTile: tileSize), true)
+        assertEquals(terminal.sizeAsksForTest.count > asks, true)
+    }
 }

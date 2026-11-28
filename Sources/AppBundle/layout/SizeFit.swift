@@ -155,20 +155,22 @@ struct SizeFitSearch: Sendable {
     /// - Returns: the size to ask for next, nil if the fit is known (``result``)
     mutating func answer(_ got: CGSize) -> CGSize? {
         answers.append(SizeAnswer(request: request, got: got))
-        if answers.count > Self.maxAsks { return nil } // An app that keeps answering otherwise
+        // Taken along both axes, also the last answer that the asks allow
         let nextWidth = width.answer(got.width, request: request.width)
         let nextHeight = height.answer(got.height, request: request.height)
-        guard nextWidth != nil || nextHeight != nil else { return nil }
+        guard nextWidth != nil || nextHeight != nil, answers.count <= Self.maxAsks else { return nil } // An app that keeps answering otherwise
         request = CGSize(width: nextWidth ?? request.width, height: nextHeight ?? request.height)
         return request
     }
 
-    /// The last answer, and the first request that the window answered with it along each axis
+    /// The last answer, and the first request that the window answered with it (the tile, for a maximum of the app):
+    /// a whole one, its answer was along both axes the last one
     var result: SizeFit {
-        SizeFit(
+        let got = answers.last?.got ?? tile
+        return SizeFit(
             tile: tile,
-            request: CGSize(width: width.request ?? request.width, height: height.request ?? request.height),
-            got: answers.last?.got ?? tile,
+            request: answers.first { $0.got.isClose(to: got) }?.request ?? request,
+            got: got,
             width: width.axis,
             height: height.axis,
             gaps: gaps,
@@ -235,12 +237,6 @@ private struct AxisSearch: Sendable {
         if excess < 0 { return lowerings > 0 || raised ? .roundedDown : .smaller }
         // Within a gap above the tile: nearer than the length below, or there is none
         return answers.contains { $0.got < tile - SizeFit.tolerance } ? .roundedUp : .notSmaller
-    }
-
-    /// The first request that the window answered with its last length: it answers it the same
-    var request: CGFloat? {
-        guard let got = answers.last?.got else { return nil }
-        return answers.first { abs($0.got - got) <= 0.5 }?.request
     }
 }
 
