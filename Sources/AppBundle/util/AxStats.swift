@@ -18,7 +18,7 @@ enum AxStats {
     enum Call {
         /// An attribute, the window of an element, the element at a position
         case read
-        /// Several attributes in one round trip (see `AXUIElement.getAll(_:)`): one read
+        /// Several attributes in one round trip (see `AXUIElement.getAll(_:_:)`): one read
         case batchedRead(additionalAttributes: Int)
         /// An attribute
         case write
@@ -40,8 +40,9 @@ enum AxStats {
         var attributesCoalesced: Int = 0
         /// Batched reads of windows that were closed (see `BatchedReadFailure.elementGone`). Not in `total`, they are reads
         var batchedReadsOfGoneElements: Int = 0
-        /// Batched reads that the app didn't answer otherwise (see `AxStats.recordBatchedReadFailure(_:attributes:)`): an
-        /// app that doesn't support them. Not in `total`, they are reads
+        /// Batched reads that failed otherwise than for a closed window: a busy app (`cannotComplete`), an answer that isn't one
+        /// value per attribute, an app that doesn't support them. The reason is in the "batched read failed" debug line (see
+        /// `AxStats.recordBatchedReadFailure(_:attributes:)`). Not in `total`, they are reads
         var batchedReadFailures: Int = 0
 
         var total: Int { reads + writes + actions + observers }

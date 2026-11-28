@@ -2,7 +2,7 @@
 import AppKit
 import Testing
 
-/// Several attributes in one round trip to the app (see `AxUiElementMock.getAll(_:)`)
+/// Several attributes in one round trip to the app (see `AxUiElementMock.getAll(_:_:)`)
 @MainActor
 @Suite(.serializedGlobally)
 struct BatchedAxReadTest {
