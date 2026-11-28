@@ -637,5 +637,35 @@ struct RefusedTileSizeTest {
         assertEquals(asks, 5) // The first search, and two that ended at the known fit
         let tile = try #require(tile(terminal))
         assertEquals(terminal.observedFrame, rect(10, tile.topLeftY - 2.5, 1900, 1064)) // Centered for the frame
+
+        // Another tile, and back: it's asked for less again
+        let other = TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
+        try await workspace.layoutWorkspace()
+        other.unbindFromParent()
+        terminal.invalidateSentFrame()
+        try await workspace.layoutWorkspace()
+        assertEquals(terminal.sizeAsksForTest.count > asks + 1, true)
+    }
+
+    /// The gap between the windows above each other changes, the tiles of a row don't: what the windows make of them is
+    /// classified with the new gap. With no gap, 5 more than the tile is a minimum of the app, with a gap of 10 the window
+    /// is asked for less and centered
+    @Test func testFitsAreKnownWithTheirGaps() async throws {
+        config.gaps = Gaps(inner: .init(vertical: 0, horizontal: 10), outer: .init(left: 10, bottom: 10, top: 10, right: 10))
+        let workspace = Workspace.get(byName: name)
+        let window = TestWindow.new(id: 1, parent: workspace.rootTilingContainer) // Tiles of 945x1059
+        window.minimumSizeForTest = CGSize(width: 0, height: 1064)
+        TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
+
+        try await layoutTwice(workspace)
+        assertEquals(window.sizeAsksForTest, [])
+        assertEquals(window.observedFrame?.topLeftY, 10)
+
+        config.gaps = Gaps(inner: .init(vertical: 10, horizontal: 10), outer: .init(left: 10, bottom: 10, top: 10, right: 10))
+        window.invalidateSentFrame()
+        try await workspace.layoutWorkspace()
+        assertEquals(tile(window), rect(10, 10, 945, 1059))
+        assertEquals(window.sizeAsksForTest.count, 3)
+        assertEquals(window.observedFrame, rect(10, 7.5, 945, 1064))
     }
 }

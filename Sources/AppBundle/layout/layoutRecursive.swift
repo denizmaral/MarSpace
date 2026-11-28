@@ -160,7 +160,7 @@ extension TreeNode {
                     lastAppliedLayoutPhysicalRect = nil
                     if context.sendsNothing { // The containers don't move it
                         let rect = window.fullscreenRect(context)
-                        frames.append(TiledWindowFrame(window: window, topLeft: rect.topLeftCorner, size: rect.size, fit: .assumed(rect.size), known: nil, minOffset: .zero))
+                        frames.append(TiledWindowFrame(window: window, topLeft: rect.topLeftCorner, size: rect.size, fit: .assumed(rect.size, gaps: context.gaps.inner.size), known: nil, minOffset: .zero))
                     } else {
                         window.layoutFullscreen(context)
                     }
@@ -170,7 +170,7 @@ extension TreeNode {
                 window.isFullscreen = false
                 let tile = CGSize(width: width, height: height)
                 let known = window.fit(forTile: tile)
-                let fit = known ?? .assumed(tile)
+                let fit = known ?? .assumed(tile, gaps: context.gaps.inner.size)
                 frames.append(TiledWindowFrame(window: window, topLeft: point, size: tile, fit: fit, known: known, minOffset: context.minOffset(onTile: physicalRect)))
                 let size = fit.size
                 return CGSize(width: size.width - tile.width, height: size.height - tile.height)
@@ -199,7 +199,7 @@ private struct TiledWindowFrame {
     let known: SizeFit?
     /// See ``TileFitting/minOffset``
     let minOffset: CGPoint
-    /// A window that rounds the size of its tile is centered on it (see ``SizeFit/centering(gaps:)``), except along the
+    /// A window that rounds the size of its tile is centered on it (see ``SizeFit/centering``), except along the
     /// orientation of a container that moves its windows off each other: the shifts are from the starts of the tiles
     var centersX = true
     var centersY = true
@@ -384,7 +384,7 @@ extension TilingContainer {
     /// ``packingShifts(_:gap:)``). A window that rounds the size of its tile up (Terminal takes whole lines and
     /// characters) is asked for less until it fits into it (see ``SizeFit``): it doesn't cover the gaps.
     ///
-    /// A window that only rounds the size of its tile is centered on it (see ``SizeFit/centering(gaps:)``), except along
+    /// A window that only rounds the size of its tile is centered on it (see ``SizeFit/centering``), except along
     /// the orientation of a container whose children are moved off each other: they are next to each other then, at the
     /// gap
     @MainActor

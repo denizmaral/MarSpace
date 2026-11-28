@@ -178,11 +178,14 @@ open class Window: TreeNode, Hashable {
     }
 
     /// What the window made of `tile` the last time, nil if it's not known
+    @MainActor
     final func fit(forTile tile: CGSize) -> SizeFit? {
-        fits.first(where: { $0.tile == tile })
+        let gaps = config.gaps.inner.size
+        return fits.first(where: { $0.tile == tile && $0.gaps == gaps })
     }
 
     /// What the window is asked for in `tile`: the size that fits into it, as far as it's known, otherwise the tile
+    @MainActor
     final func request(forTile tile: CGSize) -> CGSize {
         fit(forTile: tile).flatMap { $0.isSettled ? $0.request : nil } ?? tile
     }
@@ -201,6 +204,7 @@ open class Window: TreeNode, Hashable {
     @MainActor
     private func countRefit(_ negotiation: SizeFitNegotiation, known: SizeFit?) {
         let tile = negotiation.fit.tile
+        if let refits, refits.tile != tile { self.refits = nil } // Another tile: the window is asked for less again
         guard searchesFit(inTile: tile) else { return }
         guard negotiation.askedAgain, let known, known.isSettled, negotiation.fit == known else {
             if refits?.tile == tile { refits = nil } // It answered as known, or something new
@@ -214,8 +218,9 @@ open class Window: TreeNode, Hashable {
     }
 
     /// The size of the window in `tile`, as far as it's known (see ``SizeFit/size``)
+    @MainActor
     final func size(inTile tile: CGSize) -> CGSize {
-        (fit(forTile: tile) ?? .assumed(tile)).size
+        (fit(forTile: tile) ?? .assumed(tile, gaps: config.gaps.inner.size)).size
     }
 
     /// The window reaches beyond the gap after its tile, as far as it's known: it covers a part of the tile next to it.
@@ -224,7 +229,7 @@ open class Window: TreeNode, Hashable {
     @MainActor
     final var isBiggerThanTile: Bool {
         guard let tile = lastAppliedLayoutPhysicalRect?.size else { return false }
-        return (fit(forTile: tile) ?? .assumed(tile)).isBiggerThanTile(gaps: config.gaps.inner.size)
+        return (fit(forTile: tile) ?? .assumed(tile, gaps: config.gaps.inner.size)).isBiggerThanTile
     }
 
     /// The next ``setAxFrame(_:_:readBack:fitting:)`` sends the frame even if it's the same as the previous one
@@ -276,7 +281,7 @@ open class Window: TreeNode, Hashable {
         if known == fit { return }
         let wasBiggerThanTile = isBiggerThanTile
         remember(fit)
-        guard lastAppliedLayoutPhysicalRect?.size == fit.tile, fit.size != (known ?? .assumed(fit.tile)).size else { return }
+        guard lastAppliedLayoutPhysicalRect?.size == fit.tile, fit.size != (known ?? .assumed(fit.tile, gaps: fit.gaps)).size else { return }
         guard wasBiggerThanTile ||
             nodeWorkspace?.rootTilingContainer.allLeafWindowsRecursive
             .contains(where: { $0.lifeStatus.isInhabited && $0.isBiggerThanTile }) == true
@@ -294,22 +299,28 @@ open class Window: TreeNode, Hashable {
     private static let slowFitting: Duration = .milliseconds(100)
 
     /// A fitting that asked the window for another size than the first one (the first time it got a tile, or the app
-    /// changed its mind) is logged with every ask. At the debug level (zero cost unless the log is streamed: a dragged
-    /// border gives the window next to it a new tile many times a second), as a notice (kept: `log show` finds it) if it
-    /// didn't get the window into its tile: it reaches into the gaps
+    /// changed its mind) is logged with every ask. At the debug level (the text is made only while the log is streamed:
+    /// a dragged border gives the window next to it a new tile many times a second), as a notice (kept: `log show` finds
+    /// it) if it didn't get the window into its tile: it reaches into the gaps
     @MainActor
     private func logFitting(_ fitted: FittedFrame) {
         let negotiation = fitted.negotiation
         guard negotiation.askedAgain else { return }
         let fit = negotiation.fit
-        let asks = negotiation.answers.lazy.map { "\($0.request.debugDescription) got \($0.got.debugDescription)" }.joined(separator: ", ")
-        let line = "window \(windowId) of \(app.name ?? "?") in tile \(fit.tile.debugDescription): width \(fit.width), height \(fit.height) after \(negotiation.answers.count) asks (\(asks)) in \(fitted.duration.milliseconds) ms"
         if fit.width == .notSmaller || fit.height == .notSmaller {
-            layoutLogger.notice("\(line, privacy: .public): it reaches into the gaps")
+            layoutLogger.notice("\(self.describe(fitted), privacy: .public): it reaches into the gaps")
         } else {
-            layoutLogger.debug("\(line, privacy: .public)")
+            layoutLogger.debug("\(self.describe(fitted), privacy: .public)") // An autoclosure: made only if it's logged
         }
-        if fitted.duration > Self.slowFitting { perfLogger.error("slow size fitting: \(line, privacy: .public)") }
+        if fitted.duration > Self.slowFitting { perfLogger.error("slow size fitting: \(self.describe(fitted), privacy: .public)") }
+    }
+
+    @MainActor
+    private func describe(_ fitted: FittedFrame) -> String {
+        let negotiation = fitted.negotiation
+        let fit = negotiation.fit
+        let asks = negotiation.answers.lazy.map { "\($0.request.debugDescription) got \($0.got.debugDescription)" }.joined(separator: ", ")
+        return "window \(windowId) of \(app.name ?? "?") in tile \(fit.tile.debugDescription): width \(fit.width), height \(fit.height) after \(negotiation.answers.count) asks (\(asks)) in \(fitted.duration.milliseconds) ms"
     }
 
     /// - Parameter frame: read from the window just now

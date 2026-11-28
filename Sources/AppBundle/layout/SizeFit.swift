@@ -38,6 +38,9 @@ struct SizeFit: Sendable, Equatable {
     let got: CGSize
     let width: Axis
     let height: Axis
+    /// The gaps that the axes were classified with: a fit is known only with the same gaps (another gap can make a
+    /// refused length a rounding)
+    let gaps: CGSize
 
     /// A difference of up to a point is the rounding of a tile (tiles aren't whole points), not of the window
     static let tolerance: CGFloat = 1
@@ -45,8 +48,8 @@ struct SizeFit: Sendable, Equatable {
     static let maxLowerings = 3
 
     /// Nothing is known about the window: most windows take the size of their tile
-    static func assumed(_ tile: CGSize) -> SizeFit {
-        SizeFit(tile: tile, request: tile, got: tile, width: .fits, height: .fits)
+    static func assumed(_ tile: CGSize, gaps: CGSize) -> SizeFit {
+        SizeFit(tile: tile, request: tile, got: tile, width: .fits, height: .fits, gaps: gaps)
     }
 
     /// What a window made of `request` in its tile, nothing smaller asked (it waits in a corner of the screen, or it
@@ -58,6 +61,7 @@ struct SizeFit: Sendable, Equatable {
             got: got,
             width: classify(got.width, tile: tile.width, gap: gaps.width),
             height: classify(got.height, tile: tile.height, gap: gaps.height),
+            gaps: gaps,
         )
     }
 
@@ -83,7 +87,7 @@ struct SizeFit: Sendable, Equatable {
     /// refuses to be smaller). A window that is smaller than its tile by more than a gap at the first ask (a maximum
     /// of the app), or bigger by more than a gap (a minimum), stays at the start of its tile, where windows are moved
     /// off each other (see `TilingContainer.layoutTiles`)
-    func centering(gaps: CGSize) -> CGPoint {
+    var centering: CGPoint {
         func centering(_ axis: Axis, _ length: CGFloat, _ tileLength: CGFloat, gap: CGFloat) -> CGFloat {
             let difference = length - tileLength
             return switch axis {
@@ -100,7 +104,7 @@ struct SizeFit: Sendable, Equatable {
     }
 
     /// The window covers a part of the tile next to it, beyond the gap: windows are moved off each other around it
-    func isBiggerThanTile(gaps: CGSize) -> Bool {
+    var isBiggerThanTile: Bool {
         let size = size
         return size.width - tile.width > gaps.width || size.height - tile.height > gaps.height
     }
@@ -118,6 +122,7 @@ struct SizeAnswer: Sendable, Equatable {
 /// minimum there (``SizeFit/Axis/notSmaller``): it's asked for at most ``SizeFit/maxLowerings`` smaller sizes.
 struct SizeFitSearch: Sendable {
     let tile: CGSize
+    let gaps: CGSize
     private(set) var request: CGSize
     private(set) var answers: [SizeAnswer] = []
     private var width: AxisSearch
@@ -126,6 +131,7 @@ struct SizeFitSearch: Sendable {
     /// The window is asked for the size of the tile first
     init(tile: CGSize, gaps: CGSize) {
         self.tile = tile
+        self.gaps = gaps
         request = tile
         width = AxisSearch(tile: tile.width, gap: gaps.width)
         height = AxisSearch(tile: tile.height, gap: gaps.height)
@@ -150,6 +156,7 @@ struct SizeFitSearch: Sendable {
             got: answers.last?.got ?? tile,
             width: width.axis ?? .notSmaller,
             height: height.axis ?? .notSmaller,
+            gaps: gaps,
         )
     }
 }
@@ -166,9 +173,11 @@ private struct AxisSearch: Sendable {
         self.gap = gap
     }
 
+    /// Every answer is classified, also along an axis that is done: an app can answer another length along it when the
+    /// other one changes
+    ///
     /// - Returns: the next request, nil if the axis is done
     mutating func answer(_ got: CGFloat, request: CGFloat) -> CGFloat? {
-        if axis != nil { return nil }
         switch SizeFit.classify(got, tile: tile, gap: gap) {
             case .fits:
                 axis = .fits
@@ -211,7 +220,7 @@ struct TileFitting: Sendable, Equatable {
 
     /// Where the window goes with `fit`
     func topLeft(for fit: SizeFit) -> CGPoint {
-        let centering = fit.centering(gaps: gaps)
+        let centering = fit.centering
         return CGPoint(
             x: origin.x + (centersX ? max(centering.x, minOffset.x) : 0),
             y: origin.y + (centersY ? max(centering.y, minOffset.y) : 0),
@@ -226,7 +235,7 @@ struct TileFitting: Sendable, Equatable {
     /// - Parameter ask: sends a size to the window and reads what it made of it, nil if it can't
     /// - Returns: nil if an ask failed
     func negotiate(sent request: CGSize, got: CGSize, _ ask: (CGSize) throws -> CGSize?) rethrows -> SizeFitNegotiation? {
-        if let known, known.isSettled, known.request == request, got.isClose(to: known.got) {
+        if let known, known.isSettled, known.gaps == gaps, known.request == request, got.isClose(to: known.got) {
             return SizeFitNegotiation(fit: known, answers: [])
         }
         guard searches else { // It's placed for what it made of the frame

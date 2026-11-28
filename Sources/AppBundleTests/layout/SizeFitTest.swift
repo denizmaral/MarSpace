@@ -75,7 +75,7 @@ struct SizeFitTest {
         let negotiation = negotiate(tile) { CGSize(width: max($0.width, 1000), height: $0.height) }
         assertEquals(negotiation.answers.count, 1)
         assertEquals(negotiation.fit.width, .refused)
-        assertEquals(negotiation.fit.isBiggerThanTile(gaps: gaps), true)
+        assertEquals(negotiation.fit.isBiggerThanTile, true)
         assertEquals(fitting(tile).topLeft(for: negotiation.fit), CGPoint(x: 10, y: 41))
     }
 
@@ -130,7 +130,29 @@ struct SizeFitTest {
     /// Along the orientation of a container that moves its children off each other, and not out of the screen
     @Test func testCenteringIsLimitedByTheContainerAndTheScreen() {
         let tile = CGSize(width: 945, height: 1059)
-        let fit = SizeFit(tile: tile, request: tile, got: CGSize(width: 951, height: 1065), width: .notSmaller, height: .notSmaller)
+        let fit = SizeFit(tile: tile, request: tile, got: CGSize(width: 951, height: 1065), width: .notSmaller, height: .notSmaller, gaps: gaps)
         assertEquals(fitting(tile, centersX: false, minOffset: CGPoint(x: 0, y: -1)).topLeft(for: fit), CGPoint(x: 10, y: 40))
+    }
+
+    /// An app can answer another length along an axis that was done when the other one changes: every answer is
+    /// classified along both
+    @Test func testBothAxesAreClassifiedAtEveryAnswer() {
+        let negotiation = negotiate(CGSize(width: 1000, height: 800)) { size in
+            size.height < 800 ? CGSize(width: 1015, height: size.height) : CGSize(width: size.width, height: 806)
+        }
+        assertEquals(negotiation.fit.width, .refused)
+        assertEquals(negotiation.fit.isBiggerThanTile, true)
+    }
+
+    /// A fit is known with the gaps that it was classified with: with a gap of 0, 5 more is a minimum of the app, with a
+    /// gap of 10 it's asked for less
+    @Test func testFitOfOtherGapsIsntReused() {
+        let tile = CGSize(width: 1000, height: 1059)
+        let app: (CGSize) -> CGSize = { CGSize(width: $0.width, height: max($0.height, 1064)) }
+        let withoutGaps = SizeFit.firstAnswer(tile: tile, got: app(tile), gaps: .zero)
+        assertEquals(withoutGaps.height, .refused)
+        let negotiation = negotiate(tile, known: withoutGaps, app)
+        assertEquals(negotiation.fit.height, .notSmaller)
+        assertEquals(negotiation.fit.gaps, gaps)
     }
 }

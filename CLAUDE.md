@@ -107,7 +107,7 @@ The tiles depend only on the weights. A window can refuse the size of its tile (
 
 Like a tiled window of Hyprland, a window doesn't cover the gaps unless its app refuses to be that small. The frame job of the app fits a tile on the screen (`TileFitting`, on the thread of the app, no refresh session):
 - **Rounds up within a gap:** the window is asked for less, the excess, then twice and four times as much (`SizeFitSearch`, at most 3 smaller asks). If nothing helps, it's a minimum just above the tile (`.notSmaller`).
-- **Placement:** a window that rounds is centered on its tile (`SizeFit.centering(gaps:)`), except along the orientation of a container that moves its children off each other, and never out of the visible rect of the screen. The job moves it there, and the next layout sends the size that fits right away. The same window answering otherwise starts the search over.
+- **Placement:** a window that rounds is centered on its tile (`SizeFit.centering`), except along the orientation of a container that moves its children off each other, and never out of the visible rect of the screen. The job moves it there, and the next layout sends the size that fits right away. The same window answering otherwise starts the search over.
 - **Not searched:** windows in a corner of the screen (hidden workspaces, parked columns); the search happens when they are shown.
 - **Refresh sessions:** a fit asks for one only where windows are moved off each other (`.frameReadBack`, a changed fit at most 3 times in a row per window).
 - **Logging:** every search that asked again is a `layout` notice with its asks; the session's perf line counts the fittings.
