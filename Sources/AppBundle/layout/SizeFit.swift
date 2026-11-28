@@ -17,20 +17,20 @@ struct SizeFit: Sendable, Equatable {
     enum Axis: Sendable, Equatable {
         /// The length of the tile, within ``SizeFit/tolerance``
         case fits
-        /// Smaller than the tile when it's asked for the tile: a maximum of the app (System Settings is at most 740
-        /// wide), or it rounds the tile down
+        /// Smaller than the tile, and asking for more doesn't help: a maximum of the app (System Settings is at most 740
+        /// wide). Also more than a gap smaller at the first ask: it isn't asked for more then
         case smaller
-        /// It rounded the tile up, and a smaller ask gave a length in the tile, nearer to the tile than the one above: it
-        /// snaps to a grid (Terminal)
+        /// It snaps to a grid (Terminal), and the length below the tile is the nearest one: after an ask for less (it
+        /// rounded the tile up), or for more (it rounded the tile down, the length above is further)
         case roundedDown
         /// It rounds the tile up, by less than it rounds it down (Terminal, a line a point and a half above the tile and
         /// more than 12 below): it reaches less into the gaps than it would leave free, it's centered
         case roundedUp
         /// Bigger than the tile by at most a gap, and asking for less didn't help: a minimum of the app just above the tile
         case notSmaller
-        /// Bigger than the tile by at most a gap, nothing smaller was asked yet: it was read back in a corner of the
-        /// screen. The layout asks for less when the window is shown
-        case roundsUp
+        /// Bigger or smaller than the tile by at most a gap, nothing else was asked yet: it was read back in a corner of
+        /// the screen. The window is asked for other sizes when it's shown
+        case unsearched
         /// Bigger than the tile by more than a gap: a minimum of the app (App Store is at least 1000 wide). Windows are
         /// moved off each other around it (see `TilingContainer.packingShifts`)
         case refused
@@ -74,12 +74,12 @@ struct SizeFit: Sendable, Equatable {
     fileprivate static func classify(_ got: CGFloat, tile: CGFloat, gap: CGFloat) -> Axis {
         let excess = got - tile
         if abs(excess) <= tolerance { return .fits }
-        if excess < 0 { return .smaller }
-        return excess > gap ? .refused : .roundsUp
+        if excess > gap { return .refused }
+        return excess < -gap ? .smaller : .unsearched
     }
 
-    /// The window was asked for less wherever it rounded the tile up: the fit holds while the window answers the same
-    var isSettled: Bool { width != .roundsUp && height != .roundsUp }
+    /// The window was asked for other sizes wherever it rounds the tile: the fit holds while the window answers the same
+    var isSettled: Bool { width != .unsearched && height != .unsearched }
 
     /// The size of the window in its tile, as the layout counts it: exactly the tile where it fits (tiles aren't whole
     /// points, a window that fits never moves a sibling by a rounding error)
@@ -97,8 +97,8 @@ struct SizeFit: Sendable, Equatable {
             let difference = length - tileLength
             return switch axis {
                 case .fits, .refused: 0
-                case .roundedDown, .roundedUp, .notSmaller, .roundsUp: -difference / 2
-                case .smaller: -difference <= gap ? -difference / 2 : 0
+                case .roundedDown, .roundedUp, .notSmaller, .unsearched: -difference / 2
+                case .smaller: -difference <= gap ? -difference / 2 : 0 // A maximum within a gap: like a rounding
             }
         }
         let size = size
@@ -121,12 +121,17 @@ struct SizeAnswer: Sendable, Equatable {
     let got: CGSize
 }
 
-/// Asks a window for less, along each axis where it rounds the length of its tile up, until the length is in the tile:
-/// the excess, then twice and four times as much (an app that rounds to the nearest line goes to the line below once
-/// the request is more than half a line below the line above). The window takes the length nearest to its tile: the one
-/// above it if that's nearer than the one below (asked for again, ``SizeFit/Axis/roundedUp``), the one below on a tie.
-/// So the gaps around it are as even as its grid allows. An app that answers the same to every smaller ask has a
-/// minimum there (``SizeFit/Axis/notSmaller``): it's asked for at most ``SizeFit/maxLowerings`` smaller sizes.
+/// Asks a window for other sizes, along each axis where it rounds the length of its tile, until it has the length nearest
+/// to the tile:
+/// - **Rounds up:** it's asked for less, the excess, then twice and four times as much (an app that rounds to the nearest
+///   line goes to the line below once the request is more than half a line below the line above). At most
+///   ``SizeFit/maxLowerings`` times: an app that answers the same every time has a minimum there
+///   (``SizeFit/Axis/notSmaller``).
+/// - **Rounds down:** it's asked once for as much more (Terminal rounds towards the size that it had).
+/// - **The nearest length:** if it isn't the last answer, the window is asked again for what gave it. On a tie, the one
+///   below the tile: the window doesn't cover the gaps.
+///
+/// So the gaps around the window are as even as its grid allows.
 struct SizeFitSearch: Sendable {
     let tile: CGSize
     let gaps: CGSize
@@ -158,14 +163,14 @@ struct SizeFitSearch: Sendable {
         return request
     }
 
-    /// The last ask and its answer
+    /// The last answer, and the first request that the window answered with it along each axis
     var result: SizeFit {
         SizeFit(
             tile: tile,
-            request: answers.last?.request ?? tile,
+            request: CGSize(width: width.request ?? request.width, height: height.request ?? request.height),
             got: answers.last?.got ?? tile,
-            width: width.axis(after: answers.last?.got.width ?? tile.width),
-            height: height.axis(after: answers.last?.got.height ?? tile.height),
+            width: width.axis,
+            height: height.axis,
             gaps: gaps,
         )
     }
@@ -174,74 +179,68 @@ struct SizeFitSearch: Sendable {
 private struct AxisSearch: Sendable {
     let tile: CGFloat
     let gap: CGFloat
-    /// nil while the window is asked for other lengths
-    private(set) var axis: SizeFit.Axis? = nil
+    private var answers: [(request: CGFloat, got: CGFloat)] = []
     private var lowerings = 0
-    /// The smallest length above the tile that the window answered, and what it was asked for then
-    private var above: (request: CGFloat, got: CGFloat)? = nil
-    /// The window was asked for `above` again: it's nearer to the tile than the length below
+    /// Asked for more, once: the first answer was below the tile
+    private var raised = false
+    /// Asked again for the length nearest to the tile, once
     private var wentBack = false
+    /// The length that the window took, nil while it's asked for others
+    private var final: CGFloat? = nil
 
     init(tile: CGFloat, gap: CGFloat) {
         self.tile = tile
         self.gap = gap
     }
 
-    /// Every answer is classified, also along an axis that is done: an app can answer another length along it when the
-    /// other one changes. An answer that agrees with the axis keeps it, another one asks on from there
+    /// Every answer is taken, also along an axis that is done: an app can answer another length along it when the other
+    /// one changes. An answer that agrees with the length that the window took keeps it, another one asks on from there
     ///
     /// - Returns: the next request, nil if the axis is done
     mutating func answer(_ got: CGFloat, request: CGFloat) -> CGFloat? {
-        let answer = SizeFit.classify(got, tile: tile, gap: gap)
-        if let axis {
-            switch (axis, answer) {
-                case (_, .refused): self.axis = .refused
-                case (.fits, .fits), (.smaller, .smaller), (.roundedDown, .smaller), (.roundedDown, .fits),
-                     (.roundedUp, .roundsUp), (.notSmaller, .roundsUp):
-                    break
-                default: self.axis = nil // Asked on from this answer
-            }
-            if self.axis != nil { return nil }
+        answers.append((request, got))
+        if let final {
+            if abs(got - final) <= 0.5 { return nil }
+            self.final = nil
         }
-        switch answer {
-            case .fits:
-                axis = .fits
-            case .smaller where lowerings == 0:
-                axis = .smaller
-            case .smaller:
-                // Below the tile now: the length above is taken if it's nearer to the tile (it reaches less into the
-                // gaps than this one leaves free), asked for again
-                if !wentBack, let above, above.got - tile < tile - got {
-                    wentBack = true
-                    return above.request
-                }
-                axis = .roundedDown
-            case .refused: // Also after a smaller ask: what the app does, not a rounding
-                axis = .refused
-            case .roundsUp where wentBack:
-                axis = .roundedUp
-            case .roundsUp:
-                if above.map({ got < $0.got }) ?? true { above = (request, got) }
-                if lowerings == SizeFit.maxLowerings {
-                    axis = .notSmaller
-                    return nil
-                }
-                let next = max(1, request - (got - tile) * CGFloat(1 << lowerings))
-                lowerings += 1
-                return next
-            case .roundedDown, .roundedUp, .notSmaller:
-                die("SizeFit.classify gives no such axis")
+        let excess = got - tile
+        if excess > SizeFit.tolerance, excess <= gap, !raised, !wentBack, lowerings < SizeFit.maxLowerings {
+            let next = max(1, request - excess * CGFloat(1 << lowerings))
+            lowerings += 1
+            return next
         }
+        // Below the tile at the first ask (Terminal rounds towards the size that it had): the length above may be nearer
+        if excess < -SizeFit.tolerance, -excess <= gap, lowerings == 0, !raised, !wentBack {
+            raised = true
+            return request - excess
+        }
+        // The length nearest to the tile among the answers within a gap of it, the smaller one on a tie
+        let (tile, gap) = (tile, gap)
+        let nearest = answers.filter { abs($0.got - tile) <= gap }
+            .min { (abs($0.got - tile), $0.got) < (abs($1.got - tile), $1.got) }
+        if let nearest, abs(nearest.got - got) > 0.5, !wentBack {
+            wentBack = true
+            return nearest.request
+        }
+        final = got
         return nil
     }
 
-    /// What the axis is after the last answer, if the asks ran out (see `SizeFitSearch.maxAsks`)
-    func axis(after got: CGFloat) -> SizeFit.Axis {
-        if let axis { return axis }
-        return switch SizeFit.classify(got, tile: tile, gap: gap) {
-            case .roundsUp: .notSmaller
-            case let other: other
-        }
+    /// What the window makes of the tile after the last answer
+    var axis: SizeFit.Axis {
+        let got = answers.last?.got ?? tile
+        let excess = got - tile
+        if abs(excess) <= SizeFit.tolerance { return .fits }
+        if excess > gap { return .refused }
+        if excess < 0 { return lowerings > 0 || raised ? .roundedDown : .smaller }
+        // Within a gap above the tile: nearer than the length below, or there is none
+        return answers.contains { $0.got < tile - SizeFit.tolerance } ? .roundedUp : .notSmaller
+    }
+
+    /// The first request that the window answered with its last length: it answers it the same
+    var request: CGFloat? {
+        guard let got = answers.last?.got else { return nil }
+        return answers.first { abs($0.got - got) <= 0.5 }?.request
     }
 }
 

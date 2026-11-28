@@ -62,12 +62,35 @@ struct SizeFitTest {
         assertEquals(negotiation.fit.height, .roundedDown)
     }
 
-    @Test func testWindowThatRoundsDownIsntAskedAgain() {
+    /// Below the tile at the first ask: asked once for as much more. The line above is further (8 against 6), the window
+    /// is asked for the tile again
+    @Test func testWindowThatRoundsDownIsAskedForMoreOnce() {
         let tile = CGSize(width: 500, height: 783)
         let negotiation = negotiate(tile, Self.nearestLines)
-        assertEquals(negotiation.answers.count, 1)
-        assertEquals(negotiation.fit.height, .smaller)
+        assertEquals(negotiation.answers.map(\.request.height), [783, 789, 783])
+        assertEquals(negotiation.fit.height, .roundedDown)
+        assertEquals(negotiation.fit.request, tile)
         assertEquals(fitting(tile).topLeft(for: negotiation.fit), CGPoint(x: 10, y: 44))
+    }
+
+    /// Terminal rounds towards the size that it had: from below, 497 for a tile of 504.5. Asked for more, it takes 511,
+    /// nearer to the tile (6.5 against 7.5)
+    @Test func testNearerLineAboveIsTakenAfterAnAskForMore() {
+        let tile = CGSize(width: 500, height: 504.5)
+        let negotiation = negotiate(tile) { CGSize(width: $0.width, height: (($0.height - 7) / 14).rounded(.down) * 14 + 7) }
+        assertEquals(negotiation.answers.map(\.got.height), [497, 511])
+        assertEquals(negotiation.fit.height, .roundedUp)
+        assertEquals(negotiation.fit.request.height, 512)
+        assertEquals(fitting(tile).topLeft(for: negotiation.fit), CGPoint(x: 10, y: 41 - 3.25))
+    }
+
+    /// A maximum of the app within a gap below the tile: asking for more doesn't help, the tile is asked for
+    @Test func testMaximumWithinAGapIsAskedForMoreOnce() {
+        let tile = CGSize(width: 945, height: 1059)
+        let negotiation = negotiate(tile) { CGSize(width: min($0.width, 941), height: $0.height) }
+        assertEquals(negotiation.answers.map(\.request.width), [945, 949])
+        assertEquals(negotiation.fit.request, tile)
+        assertEquals(fitting(tile).topLeft(for: negotiation.fit), CGPoint(x: 12, y: 41))
     }
 
     /// A minimum of the app just above the tile: asking for less doesn't help, the window covers a part of the gaps
@@ -132,7 +155,7 @@ struct SizeFitTest {
     @Test func testFirstAnswerThatRoundsUpIsntSettled() {
         let tile = CGSize(width: 1265, height: 777.5)
         let fit = SizeFit.firstAnswer(tile: tile, got: CGSize(width: 1265, height: 785), gaps: gaps)
-        assertEquals(fit.height, .roundsUp)
+        assertEquals(fit.height, .unsearched)
         assertEquals(fit.isSettled, false)
         let negotiation = negotiate(tile, known: fit, Self.linesRoundedUp)
         assertEquals(negotiation.fit.height, .roundedDown)
@@ -165,5 +188,14 @@ struct SizeFitTest {
         let negotiation = negotiate(tile, known: withoutGaps, app)
         assertEquals(negotiation.fit.height, .notSmaller)
         assertEquals(negotiation.fit.gaps, gaps)
+    }
+
+    /// A little below the tile in a corner of the screen is a rounding too: asked for more when the window is shown
+    @Test func testFirstAnswerThatRoundsDownIsntSettled() {
+        let tile = CGSize(width: 500, height: 504.5)
+        let floorLines: (CGSize) -> CGSize = { CGSize(width: $0.width, height: (($0.height - 7) / 14).rounded(.down) * 14 + 7) }
+        let fit = SizeFit.firstAnswer(tile: tile, got: floorLines(tile), gaps: gaps)
+        assertEquals(fit.height, .unsearched)
+        assertEquals(negotiate(tile, known: fit, floorLines).fit.height, .roundedUp)
     }
 }

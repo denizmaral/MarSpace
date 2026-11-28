@@ -93,7 +93,7 @@ extension TreeNode {
                     let fitting = frame.fitting(context.gaps.inner.size)
                     let tile = fitting.topLeft(for: frame.fit)
                     let request = frame.fit.isSettled ? frame.fit.request : frame.size
-                    // A column off the screen waits in a corner: it isn't fitted there (see SizeFit.Axis.roundsUp)
+                    // A column off the screen waits in a corner: it isn't fitted there (see SizeFit.Axis.unsearched)
                     let (topLeft, finalFitting) = if frame.isParked, let screen = context.scrollingScreen {
                         (frame.window.topLeftHidden(in: screen.hideCorner, width: frame.fit.size.width, of: screen.visibleRect), TileFitting?.none)
                     } else {

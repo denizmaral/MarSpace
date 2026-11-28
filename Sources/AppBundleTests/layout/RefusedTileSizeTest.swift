@@ -518,9 +518,9 @@ struct RefusedTileSizeTest {
         assertEquals(roundsDown.observedFrame, rect(967, 12, 941, 1055))
         let tileSize = CGSize(width: 945, height: 1059)
         assertEquals([roundsUp, roundsDown].flatMap { $0.sentFrames.compactMap(\.size) }, [tileSize, tileSize])
-        // Asked for less three times: it's a minimum
+        // Asked for less three times, or for more once: it's a minimum, a maximum
         assertEquals(roundsUp.sizeAsksForTest, [CGSize(width: 939, height: 1053), CGSize(width: 927, height: 1041), CGSize(width: 903, height: 1017)])
-        assertEquals(roundsDown.sizeAsksForTest, [])
+        assertEquals(roundsDown.sizeAsksForTest, [CGSize(width: 949, height: 1063)])
 
         // Nothing changes anymore
         try await workspace.layoutWorkspace()
@@ -634,7 +634,7 @@ struct RefusedTileSizeTest {
             try await workspace.layoutWorkspace()
         }
         assertEquals(terminal.sizeAsksForTest.count, asks)
-        assertEquals(asks, 3)
+        assertEquals(asks, 5) // The first fitting asks for less, the next ones for the tile, and for less
         let tile = try #require(tile(terminal))
         assertEquals(terminal.observedFrame, rect(10, tile.topLeftY - 4, 1900, 1064)) // Centered for the frame
 
