@@ -253,9 +253,9 @@ open class Window: TreeNode, Hashable {
         guard generation == frameGeneration else { return } // Sent again or moved meanwhile: a newer read back follows
         if let fitted { // Where the job put it: the next layout with the same fit sends nothing
             sentFrame = SentFrame(topLeft: fitted.topLeft, size: fitted.negotiation.fit.request)
-        } else if let asked = sentFrame?.size, !fits.contains(where: { $0.isSettled && $0.request == asked && $0.request != $0.tile }) {
-            // E.g. in a corner of the screen: what it made of the size of its tile. A size that fits it into a tile stays
-            // what it is, the window is asked again when it's shown
+        } else if let asked = sentFrame?.size, !fits.contains(where: { $0.isSettled && $0.request == asked }) {
+            // E.g. in a corner of the screen: what it made of the size of its tile, the first time. A fit found on the
+            // screen stays what it is: the window is asked again when it's shown, if it answers otherwise there
             learn(.firstAnswer(tile: asked, got: frame.size, gaps: config.gaps.inner.size), at: now)
         }
         // It arrives after the session that sent the frame (it doesn't matter if another session is running)

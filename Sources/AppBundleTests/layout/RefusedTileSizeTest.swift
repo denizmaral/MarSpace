@@ -668,4 +668,21 @@ struct RefusedTileSizeTest {
         assertEquals(window.sizeAsksForTest.count, 3)
         assertEquals(window.observedFrame, rect(10, 7.5, 945, 1064))
     }
+
+    /// A window in a corner of the screen answers its tile otherwise than on the screen: the fit found on the screen
+    /// stays. The window is asked again when it's shown
+    @Test func testCornerAnswerDoesntReplaceAFitOfTheScreen() async throws {
+        setGaps(inner: 10, outer: (10, 10, 10, 10))
+        let workspace = Workspace.get(byName: name)
+        let window = TestWindow.new(id: 1, parent: workspace.rootTilingContainer) // Tiles of 945x1059
+        TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
+        try await layoutTwice(workspace)
+        let tileSize = CGSize(width: 945, height: 1059)
+        assertEquals(window.fit(forTile: tileSize)?.height, .fits)
+
+        window.minimumSizeForTest = CGSize(width: 0, height: 1080)
+        window.setAxFrame(CGPoint(x: 1919, y: 1079), window.request(forTile: tileSize)) // MacWindow.hideInCorner
+        assertEquals(window.fit(forTile: tileSize)?.height, .fits)
+        assertEquals(layoutsAskedForByReadBacks, 0)
+    }
 }

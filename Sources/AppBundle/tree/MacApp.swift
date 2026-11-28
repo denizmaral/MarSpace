@@ -704,12 +704,11 @@ private func fit(
     // The layout that sent the frame didn't know what the window makes of its tile: it's centered on it now
     let placed = fitting.topLeft(for: negotiation.fit)
     let fitted = FittedFrame(negotiation: negotiation, topLeft: placed, duration: duration)
-    if placed != topLeft {
-        try job.checkCancellation()
-        guard window.set(Ax.topLeftCornerAttr, placed) else { return .notApplied }
-    } else if !negotiation.askedAgain {
-        return .readBack(frame, fitted) // Neither its size nor its place changed since the frame was read
-    }
+    // Neither its size nor its place changed since the frame was read
+    guard placed != topLeft || negotiation.askedAgain else { return .readBack(frame, fitted) }
+    // Also where it was sent already: an ask for less can move the window (macOS keeps it on the screen)
+    try job.checkCancellation()
+    guard window.set(Ax.topLeftCornerAttr, placed) else { return .notApplied }
     try job.checkCancellation()
     return .readBack(try AppBundle::getAxRect(window: window, job: job) ?? frame, fitted)
 }
