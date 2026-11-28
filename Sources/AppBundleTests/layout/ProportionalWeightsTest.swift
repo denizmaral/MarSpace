@@ -19,7 +19,7 @@ struct ProportionalWeightsTest {
     /// next session normalizes the containers and lays out again
     private func setFullscreen(_ windows: [TestWindow], _ isFullscreen: Bool, _ workspace: Workspace) async throws {
         for window in windows { window.isMacosFullscreenForTest = isFullscreen }
-        try await normalizeLayoutReason()
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         try await workspace.layoutWorkspace()
         workspace.normalizeContainers()
         try await workspace.layoutWorkspace()

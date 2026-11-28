@@ -113,6 +113,9 @@ final class SessionAxCost: Sendable {
         var appsAsked: (asked: Int, of: Int)? = nil
         /// A complete refresh session: the windows whose native state it read (one batched read each)
         var nativeStateReads: Int? = nil
+        /// A complete refresh session: whether it reported the changes of the apps that it wasn't asked for, and how many
+        /// it found (see MissedChanges)
+        var missedCheck: (check: MissedCheck, notices: Int)? = nil
     }
 
     private let name: String
@@ -129,6 +132,8 @@ final class SessionAxCost: Sendable {
 
     func recordAppsAsked(_ asked: Int, of total: Int) { state.withLock { $0.appsAsked = (asked, total) } }
     func recordNativeStateReads(_ windows: Int) { state.withLock { $0.nativeStateReads = windows } }
+    func recordMissedCheck(_ check: MissedCheck, notices: Int) { state.withLock { $0.missedCheck = (check, notices) } }
+    var missedCheck: (check: MissedCheck, notices: Int)? { state.withLock { $0.missedCheck } }
 
     func recordSizeFitting(asks: Int, duration: Duration) {
         state.withLock {
@@ -156,8 +161,8 @@ final class SessionAxCost: Sendable {
 
     deinit {
         let now = ContinuousClock.now - start
-        let (ax, duration, jobs, footprint, fittings, fittingAsks, fittingDuration, apps, nativeStates) = state.withLock {
-            ($0.counters, $0.duration ?? now, $0.jobsDuration, $0.footprintMegabytes, $0.sizeFittings, $0.sizeFittingAsks, $0.sizeFittingDuration, $0.appsAsked, $0.nativeStateReads)
+        let (ax, duration, jobs, footprint, fittings, fittingAsks, fittingDuration, apps, nativeStates, missed) = state.withLock {
+            ($0.counters, $0.duration ?? now, $0.jobsDuration, $0.footprintMegabytes, $0.sizeFittings, $0.sizeFittingAsks, $0.sizeFittingDuration, $0.appsAsked, $0.nativeStateReads, $0.missedCheck)
         }
         let jobsDuration = max(duration, jobs ?? duration)
         let outside = AxStats.callsOutsideOfSessions.total
@@ -166,11 +171,26 @@ final class SessionAxCost: Sendable {
                 (wait.coalesced.map { " coalesced=\($0)" } ?? "") + (wait.isRerun.map { " rerun=\($0)" } ?? "")
         } ?? ""
         // The frames sent on the screen are fitted into their tiles: asks for less, when a window rounds its tile up
-        let refresh = (apps.map { " apps=\($0.asked)/\($0.of)" } ?? "") + (nativeStates.map { " nativeStates=\($0)" } ?? "")
+        let missedLine = Self.missedCheckFields(missed)
+        let refresh = (apps.map { " apps=\($0.asked)/\($0.of)" } ?? "") + (nativeStates.map { " nativeStates=\($0)" } ?? "") + missedLine
         let fitting = fittings == 0 ? "" : " sizeFittings=\(fittings) sizeFittingAsks=\(fittingAsks) sizeFittingMs=\(fittingDuration.milliseconds)"
         perfLogger.debug(
             "session=\(self.name, privacy: .public) axReads=\(ax.reads) axAttrsCoalesced=\(ax.attributesCoalesced) axBatchFailures=\(ax.batchedReadFailures) axBatchesOfGone=\(ax.batchedReadsOfGoneElements) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public)\(refresh, privacy: .public)\(fitting, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
         )
+    }
+}
+
+extension SessionAxCost {
+    /// The fields of the perf line of a full sweep: whether it reported the changes of the apps that it wasn't asked for,
+    /// and how many it found. Not reported (the window server was blind): suppressed. No count for a sweep asked for every app
+    /// (it collects nothing), empty for a scoped session
+    static func missedCheckFields(_ missed: (check: MissedCheck, notices: Int)?) -> String {
+        guard let missed else { return "" }
+        return switch missed.check {
+            case .on: " missedCheck=on missed=\(missed.notices)"
+            case .off(.notWidened): " missedCheck=\(missed.check)" // It collects nothing
+            case .off: " missedCheck=\(missed.check) missedSuppressed=\(missed.notices)"
+        }
     }
 }
 

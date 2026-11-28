@@ -14,9 +14,9 @@ private var isStartupSessionOver = false
 /// The scopes of ``completeRefreshSessionsAskedForInTests``
 @MainActor var completeRefreshScopesAskedForInTests: [RefreshScope] = []
 
-/// When the last complete refresh session that asked every app ended (see ``RefreshScope/effective(lastFullSweep:now:)``)
+/// The complete refresh sessions that asked every app (see ``FullSweeps``)
 @MainActor
-private var lastFullSweep: ContinuousClock.Instant? = nil
+private var fullSweeps = FullSweeps()
 
 /// - Parameter scope: what may have changed, see ``RefreshScope``
 @MainActor
@@ -47,10 +47,11 @@ func runHeavyCompleteRefreshSession(
     defer { signposter.endInterval(#function, state) }
     defer { if event.isStartup { isStartupSessionOver = true } }
     if !TrayMenuModel.shared.isEnabled { return }
-    let scope = requested.effective(lastFullSweep: lastFullSweep, now: .now)
     // Asked for some apps and asks every app, because the last time is too long ago: what it finds of the other apps
-    // was missed (see logMissedChange)
-    let missedOutside = scope != requested ? requested.pids : nil
+    // wasn't notified (see FullSweeps)
+    let plan = fullSweeps.begin(requested, now: .now, blindness: WindowServerBlindness.shared.observeNow)
+    let scope = plan.scope
+    let missed = MissedChanges(plan)
     let axCost = SessionAxCost("heavy \(event) scope=\(scope)\(scope != requested ? " asked=\(requested)" : "")")
     defer { axCost.sessionDidFinish() }
     let res = await Result {
@@ -64,7 +65,7 @@ func runHeavyCompleteRefreshSession(
             if shouldLayoutWorkspaces && optimisticallyPreLayoutWorkspaces { try await layoutWorkspaces() }
 
             await refreshModel_nonCancellable()
-            if scope != .layout { try await refresh(scope.pids, missedOutside: missedOutside) }
+            if scope != .layout { try await refresh(scope.pids, missed: missed) }
             // The windows were registered one by one, in an arbitrary order: back to their places of the previous run (when
             // the first windows of the previous run are there: the screen may be locked when MarSpace starts)
             WindowPlacementStore.restoreTilingTreesOfPreviousRunIfPending()
@@ -72,7 +73,7 @@ func runHeavyCompleteRefreshSession(
 
             updateTrayText()
             SecureInputPanel.shared.refresh()
-            if scope != .layout { try await normalizeLayoutReason(scope.pids, missedOutside: missedOutside) }
+            if scope != .layout { try await normalizeLayoutReason(scope.pids, missed: missed) }
             // New windows (after the window rules) and windows back from macOS native states
             Workspace.applyFloatingLayouts()
             normalizeContainers()
@@ -82,7 +83,8 @@ func runHeavyCompleteRefreshSession(
         } }
     }
     switch res {
-        case .success(()): if scope == .everything { lastFullSweep = .now }
+        case .success(()):
+            missed.report(fullSweeps.end(plan, now: .now, blindness: WindowServerBlindness.shared.observeNow), to: axCost)
         case .failure(let err as CancellationError): check(assumeCancellable, "Non cancellable refresh session was canceled: \(err) (\(type(of: err)))")
         case .failure(let err): die("Illegal error: \(err)")
     }
@@ -180,9 +182,9 @@ func refreshModel_nonCancellable() async {
 
 /// - Parameter pids: the apps that are asked for their windows, nil: every app. The windows of the others are what
 ///   MarSpace knows of them
-/// - Parameter missedOutside: see ``logMissedChange(_:_:missedOutside:)``
+/// - Parameter missed: the changes of the apps that the session wasn't asked for
 @MainActor
-private func refresh(_ pids: Set<pid_t>?, missedOutside: Set<pid_t>?) async throws {
+private func refresh(_ pids: Set<pid_t>?, missed: MissedChanges) async throws {
     // Garbage collect terminated apps and windows before working with all windows
     let mapping = try await MacApp
         .refreshAllAndGetAliveWindowIds(frontmostAppBundleId: RunningApps.frontmost?.bundleId, only: pids)
@@ -192,14 +194,14 @@ private func refresh(_ pids: Set<pid_t>?, missedOutside: Set<pid_t>?) async thro
     // again for each of them
     var isWorldCached = false
     for window in MacWindow.allWindows where !aliveWindowIds.contains(window.windowId) {
-        logMissedChange(window.macApp.pid, "window \(window.windowId) closed", missedOutside: missedOutside)
+        missed.note(window.macApp.pid, "window \(window.windowId) closed")
         window.lifeStatus = .dead
         if window.garbageCollect(skipClosedWindowsCache: isWorldCached) { isWorldCached = true }
     }
     for (app, windows) in mapping {
         for (windowId, lifeStatus) in windows {
             if MacWindow.allWindowsMap[windowId] == nil {
-                logMissedChange(app.pid, "window \(windowId) appeared", missedOutside: missedOutside)
+                missed.note(app.pid, "window \(windowId) appeared")
             }
             try await MacWindow.getOrRegister(windowId: windowId, macApp: app, lifeStatus: lifeStatus).lifeStatus = lifeStatus
         }
@@ -223,19 +225,6 @@ func refreshObs(_: AXObserver, _ ax: AXUIElement, notif: CFString, _: UnsafeMuta
         if pid == nil { perfLogger.debug("notification \(notif, privacy: .public) without the app: everything is refreshed") }
         scheduleCancellableCompleteRefreshSession(.ax(notif), scope: .app(pid))
     }
-}
-
-/// A complete refresh session that asks every app, because the last one is too long ago, found a change of an app that
-/// the scoped sessions before it didn't ask (see ``RefreshScope``): the app didn't notify about it. Logged as a notice
-/// (kept): the events of that app need a look
-///
-/// - Parameter missedOutside: the apps that the session was asked for, nil if it wasn't asked for some apps only
-@MainActor
-func logMissedChange(_ pid: pid_t, _ change: @autoclosure () -> String, missedOutside: Set<pid_t>?) {
-    guard let missedOutside, !missedOutside.contains(pid) else { return }
-    let app = MacApp.allAppsMap[pid]?.name ?? "\(pid)"
-    let change = change()
-    perfLogger.notice("missed by the scoped refresh sessions: \(change, privacy: .public) of \(app, privacy: .public)")
 }
 
 enum OptimalHideCorner {

@@ -4,8 +4,8 @@ import AppKit
 @MainActor var lastInvisibleWindowsNativeStateCheck: ContinuousClock.Instant? = nil
 
 /// - Parameter pids: the apps of the session, nil: every app (see `RefreshScope.readsNativeState`)
-/// - Parameter missedOutside: see `logMissedChange(_:_:missedOutside:)`
-@MainActor func normalizeLayoutReason(_ pids: Set<pid_t>? = nil, missedOutside: Set<pid_t>? = nil) async throws {
+/// - Parameter missed: the changes of the apps that the session wasn't asked for (see `FullSweeps`)
+@MainActor func normalizeLayoutReason(_ pids: Set<pid_t>? = nil, missed: MissedChanges) async throws {
     // Windows of invisible workspaces are hidden in the corner of the screen, their native state rarely changes. Saves
     // a round trip per window per refresh session (see nativeState(of:)). They are checked:
     // - when AX notifies about a native state change (e.g. "Minimize All"), see refreshObs, or AeroSpace changes it
@@ -37,7 +37,7 @@ import AppKit
         let requested = windows.filter(\.isNativeStateCheckRequested)
         for window in requested { window.isNativeStateCheckRequested = false }
         do {
-            try await _normalizeLayoutReason(workspace: workspace, windows: windows, missedOutside: missedOutside)
+            try await _normalizeLayoutReason(workspace: workspace, windows: windows, missed: missed)
         } catch {
             for window in requested { window.isNativeStateCheckRequested = true } // Not checked, e.g. the session is canceled
             throw error
@@ -45,7 +45,7 @@ import AppKit
     }
     let minimized = macosMinimizedWindowsContainer.children.filterIsInstance(of: Window.self)
     read += minimized.count
-    try await _normalizeLayoutReason(workspace: globalFocus.workspace, windows: minimized, missedOutside: missedOutside)
+    try await _normalizeLayoutReason(workspace: globalFocus.workspace, windows: minimized, missed: missed)
     try await validateStillPopups(pids)
 }
 
@@ -80,7 +80,7 @@ import AppKit
     }
 }
 
-@MainActor private func _normalizeLayoutReason(workspace: Workspace, windows: [Window], missedOutside: Set<pid_t>?) async throws {
+@MainActor private func _normalizeLayoutReason(workspace: Workspace, windows: [Window], missed: MissedChanges) async throws {
     let states = try await windows.mapConcurrently { try await $0.getMacosWindowNativeState(.cancellable) }
     for (window, state) in zip(windows, states) {
         let isMacosFullscreen = state == .nativeFullscreen
@@ -103,7 +103,7 @@ import AppKit
         let wasStandard = window.layoutReason == .standard
         defer {
             if (window.layoutReason == .standard) != wasStandard {
-                logMissedChange(window.app.pid, "window \(window.windowId) \(wasStandard ? "entered" : "left") a native state", missedOutside: missedOutside)
+                missed.note(window.app.pid, "window \(window.windowId) \(wasStandard ? "entered" : "left") a native state")
             }
         }
         switch window.layoutReason {
