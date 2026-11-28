@@ -7,7 +7,7 @@ import Testing
 struct NormalizeLayoutReasonTest {
     init() { setUpWorkspacesForTests() }
 
-    /// 2 AX calls per window per refresh session are saved for windows of invisible workspaces
+    /// A round trip per window per refresh session is saved for windows of invisible workspaces
     @Test func testWindowsOfInvisibleWorkspacesAreCheckedAtMostEvery5Seconds() async throws {
         let workspace = Workspace.get(byName: "invisible")
         let window = TestWindow.new(id: 1, parent: workspace.rootTilingContainer)

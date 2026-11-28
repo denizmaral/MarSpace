@@ -365,22 +365,30 @@ extension AXUIElement: AxUiElementMock {
     }
 
     /// One round trip to the app (`AXUIElementCopyMultipleAttributeValues`), instead of one per attribute
-    func getAll<each Attr: ReadableAttr>(_ attrs: repeat each Attr) -> (repeat (each Attr).T?) {
-        var keys: [String] = []
-        for attr in repeat each attrs { keys.append(attr.key) }
+    func getAll<First: ReadableAttr, each Rest: ReadableAttr>(
+        _ first: First,
+        _ rest: repeat each Rest,
+    ) -> (First.T?, repeat (each Rest).T?) {
+        var keys = [first.key]
+        for attr in repeat each rest { keys.append(attr.key) }
         let state = signposter.beginInterval(#function, "attrs: \(keys) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
         defer { signposter.endInterval(#function, state) }
-        AxStats.record(.batchedRead(attributes: keys.count))
+        AxStats.record(.batchedRead(additionalAttributes: keys.count - 1))
         var raw: CFArray?
         let error = unsafe AXUIElementCopyMultipleAttributeValues(self, keys as CFArray, [], &raw)
-        let values = error == .success ? (raw as [AnyObject]?) ?? [] : []
-        if values.count != keys.count { AxStats.recordBatchedReadFailure(error, attributes: keys) }
+        let values: [AnyObject?]
+        switch Ax.batchedValues(error, raw as [AnyObject]?, count: keys.count) {
+            case .success(let answered): values = answered
+            case .failure(let failure):
+                AxStats.recordBatchedReadFailure(failure, attributes: keys)
+                values = Array(repeating: nil, count: keys.count)
+        }
         var index = 0
         func value<A: ReadableAttr>(_ attr: A) -> A.T? {
             defer { index += 1 }
-            return values.indices.contains(index) ? Ax.batchedValue(values[index]).flatMap(attr.getter) : nil
+            return values[index].flatMap(attr.getter)
         }
-        return (repeat value(each attrs))
+        return (value(first), repeat value(each rest))
     }
 
     @discardableResult func set<Attr: WritableAttr>(_ attr: Attr, _ value: Attr.T) -> Bool {
@@ -416,7 +424,29 @@ extension AXUIElement: AxUiElementMock {
     }
 }
 
+/// Why a batched read has no values (see `AXUIElement.getAll(_:_:)`)
+enum BatchedReadFailure: Error, Equatable {
+    /// The element is gone: a window that was closed. Normal
+    case elementGone
+    /// The app answered something else than one value per attribute
+    case wrongCount(Int)
+    /// Another error: an app that doesn't support batched reads would lose the frames and the native states of its windows
+    case other(AXError)
+}
+
 extension Ax {
+    /// The values of `AXUIElementCopyMultipleAttributeValues`, one per attribute (nil: the element doesn't have it), or
+    /// why there are none. Values that aren't one per attribute aren't taken: they could land on the wrong attributes
+    static func batchedValues(_ error: AXError, _ values: [AnyObject]?, count: Int) -> Result<[AnyObject?], BatchedReadFailure> {
+        switch error {
+            case .success: break
+            case .invalidUIElement: return .failure(.elementGone)
+            default: return .failure(.other(error))
+        }
+        guard let values, values.count == count else { return .failure(.wrongCount(values?.count ?? 0)) }
+        return .success(values.map(batchedValue))
+    }
+
     /// A value of `AXUIElementCopyMultipleAttributeValues`: an attribute that the element doesn't have is an error value
     /// in the array (the getters of the attributes don't take it, the one of the position would fail its check)
     static func batchedValue(_ value: AnyObject) -> AnyObject? {
