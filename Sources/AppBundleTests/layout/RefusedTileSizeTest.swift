@@ -573,7 +573,7 @@ struct RefusedTileSizeTest {
     }
 
     /// A key that repeats a resize, or a dragged border: the tile of a window that rounds its size changes many times a
-    /// second. Every tile is fitted by the frame job, no layout is asked for: the window ends in its last tile, centered
+    /// second. Every tile is fitted by the frame job, no layout is asked for: the window ends centered on its last tile
     @Test func testWindowThatRoundsFitsAfterManyResizesInASecond() async throws {
         setGaps(inner: 10, outer: (5, 10, 5, 10))
         let workspace = Workspace.get(byName: name)
@@ -582,7 +582,7 @@ struct RefusedTileSizeTest {
         let other = TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
         let start = ContinuousClock.now
         // The weights are the lengths with the gaps (1910 together). Terminal makes 952, 959, 973, 987 and 994 of the
-        // widths of its tile, and 1064 of its height (1059): asked for less, 1050
+        // widths of its tile, and 1064 of its height (1059): asked for less, 1050, further from the tile than 1064
         for (step, width) in [950, 960, 970, 985, 995].enumerated() {
             terminal.setWeight(.h, CGFloat(width) + 5)
             other.setWeight(.h, 1905 - CGFloat(width))
@@ -593,7 +593,7 @@ struct RefusedTileSizeTest {
 
         try await workspace.layoutWorkspace()
         assertEquals(tile(terminal), rect(5, 10, 995, 1059))
-        assertEquals(terminal.observedFrame, rect(5, 14.5, 994, 1050)) // 994 is within a point of 995: it fits
+        assertEquals(terminal.observedFrame, rect(5, 7.5, 994, 1064)) // 994 is within a point of 995: it fits
         assertEquals(layoutsAskedForByReadBacks, 0)
     }
 
@@ -612,18 +612,18 @@ struct RefusedTileSizeTest {
         assertEquals(terminal.observedFrame, rect(7, 7, 951, 1065))
     }
 
-    /// A window that answers the whole frame otherwise than the asks for less ends at the known fit after every search:
-    /// every layout would ask again, and the asks move it (its notifications lay it out again). After two of those, it's
-    /// placed for what it makes of the frame, and nothing more is asked
+    /// A window that answers the whole frame otherwise than the asks (a line more) is asked again by every layout: the
+    /// known fit doesn't come back, the fits alternate. The asks move it, its notifications lay it out again. After three
+    /// fittings in a row that asked again, it's placed for what it makes of the frame, and nothing more is asked
     @Test func testWindowThatAnswersTheFrameOtherwiseIsntAskedForever() async throws {
-        setGaps(inner: 10, outer: (10, 10, 10, 10))
+        setGaps(inner: 10, outer: (10, 10, 10, 13))
         let workspace = Workspace.get(byName: name)
-        let terminal = TestWindow.new(id: 1, parent: workspace.rootTilingContainer) // A tile of 1900x1059
+        let terminal = TestWindow.new(id: 1, parent: workspace.rootTilingContainer) // A tile of 1900x1056
         terminal.characterGridForTest = CGSize(width: 1, height: 14)
         terminal.frameAnswersALineMoreForTest = true
 
         try await workspace.layoutWorkspace()
-        assertEquals(terminal.observedFrame?.height, 1050) // 1064 for the frame, 1050 for 1054 alone
+        assertEquals(terminal.observedFrame?.height, 1050) // 1064 for the frame, 1050 for 1048 alone: nearer
         for _ in 1 ... 5 { // The notifications of the asks
             terminal.invalidateSentFrame()
             try await workspace.layoutWorkspace()
@@ -634,9 +634,9 @@ struct RefusedTileSizeTest {
             try await workspace.layoutWorkspace()
         }
         assertEquals(terminal.sizeAsksForTest.count, asks)
-        assertEquals(asks, 5) // The first search, and two that ended at the known fit
+        assertEquals(asks, 3)
         let tile = try #require(tile(terminal))
-        assertEquals(terminal.observedFrame, rect(10, tile.topLeftY - 2.5, 1900, 1064)) // Centered for the frame
+        assertEquals(terminal.observedFrame, rect(10, tile.topLeftY - 4, 1900, 1064)) // Centered for the frame
 
         // Another tile, and back: it's asked for less again
         let other = TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
