@@ -611,4 +611,31 @@ struct RefusedTileSizeTest {
         assertEquals(tile(terminal), rect(10, 10, 945, 1059))
         assertEquals(terminal.observedFrame, rect(7, 7, 951, 1065))
     }
+
+    /// A window that answers the whole frame otherwise than the asks for less ends at the known fit after every search:
+    /// every layout would ask again, and the asks move it (its notifications lay it out again). After two of those, it's
+    /// placed for what it makes of the frame, and nothing more is asked
+    @Test func testWindowThatAnswersTheFrameOtherwiseIsntAskedForever() async throws {
+        setGaps(inner: 10, outer: (10, 10, 10, 10))
+        let workspace = Workspace.get(byName: name)
+        let terminal = TestWindow.new(id: 1, parent: workspace.rootTilingContainer) // A tile of 1900x1059
+        terminal.characterGridForTest = CGSize(width: 1, height: 14)
+        terminal.frameAnswersALineMoreForTest = true
+
+        try await workspace.layoutWorkspace()
+        assertEquals(terminal.observedFrame?.height, 1050) // 1064 for the frame, 1050 for 1054 alone
+        for _ in 1 ... 5 { // The notifications of the asks
+            terminal.invalidateSentFrame()
+            try await workspace.layoutWorkspace()
+        }
+        let asks = terminal.sizeAsksForTest.count
+        for _ in 1 ... 3 {
+            terminal.invalidateSentFrame()
+            try await workspace.layoutWorkspace()
+        }
+        assertEquals(terminal.sizeAsksForTest.count, asks)
+        assertEquals(asks, 5) // The first search, and two that ended at the known fit
+        let tile = try #require(tile(terminal))
+        assertEquals(terminal.observedFrame, rect(10, tile.topLeftY - 2.5, 1900, 1064)) // Centered for the frame
+    }
 }

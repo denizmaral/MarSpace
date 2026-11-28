@@ -212,8 +212,18 @@ private struct TiledWindowFrame {
     var animationDelta: CGPoint? = nil
 
     /// What the frame job needs to fit the window into its tile, on the thread of its app
+    @MainActor
     func fitting(_ gaps: CGSize) -> TileFitting {
-        TileFitting(tile: size, origin: topLeft + shift, gaps: gaps, centersX: centersX, centersY: centersY, minOffset: minOffset, known: known)
+        TileFitting(
+            tile: size,
+            origin: topLeft + shift,
+            gaps: gaps,
+            centersX: centersX,
+            centersY: centersY,
+            minOffset: minOffset,
+            known: known,
+            searches: window.searchesFit(inTile: size),
+        )
     }
 
     /// Not centered along `orientation`
