@@ -19,7 +19,7 @@ open class Window: TreeNode, Hashable {
     weak var dwindleSplitAnchor: TreeNode? = nil
     /// The last `swap` of the window in a direction: the opposite direction right after it swaps the windows back
     var lastDirectionalSwap: DirectionalSwap? = nil
-    /// See ``setAxFrame(_:_:readBack:)``
+    /// See ``setAxFrame(_:_:readBack:fitting:)``
     private var sentFrame: SentFrame? = nil
     /// Where the window is on the screen, as far as AeroSpace knows, without accessibility calls. Unlike the tile
     /// (``lastAppliedLayoutPhysicalRect``: the place in the tree), it's what the user sees: a window refuses a size
@@ -29,13 +29,15 @@ open class Window: TreeNode, Hashable {
     /// Floating windows are read by every layout (``observeFrame(_:)``). Code that deals with the screen (the focus
     /// border, focus-follows-mouse) uses it, the layout and the tree commands use the tile
     private(set) var observedFrame: Rect? = nil
-    /// What the window made of the last two sizes that it was asked for: an app can refuse a size (App Store is at least
-    /// 1000 wide, System Settings at most 740). Asking for the same size again gives the same answer, wherever the window
-    /// is (e.g. after a workspace switch hid it in a corner of the screen). Two: the size of its tile comes back after
-    /// macOS fullscreen, or after a window was opened next to it and closed again. See ``size(inTile:)``
-    private var sizeAnswers: (latest: SizeAnswer?, previous: SizeAnswer?) = (nil, nil)
+    /// What the window made of the last tiles that it was given, and what it's asked for in them (see ``SizeFit``): an
+    /// app can refuse a size (App Store is at least 1000 wide, System Settings at most 740), or round it (Terminal). The
+    /// same tile gets the same answer again, wherever the window is (e.g. after a workspace switch hid it in a corner of
+    /// the screen). A few: the size of its tile comes back after macOS fullscreen, or after a window was opened next to
+    /// it and closed again. The most recent first
+    private var fits: [SizeFit] = []
+    private static let rememberedFits = 4
     /// The refresh sessions that were asked for in a row because of what the window made of its tile. See
-    /// ``rememberSizeAnswer(asked:got:at:)``
+    /// ``learn(_:isFitted:at:)``
     private var layoutRequestsAfterReadBack: (count: Int, last: ContinuousClock.Instant)? = nil
     /// Identifies the latest knowledge about the frame: a read back of an older send is stale
     private var frameGeneration: UInt = 0
@@ -141,8 +143,10 @@ open class Window: TreeNode, Hashable {
     ///
     /// - Parameter readBack: read the frame back after it's applied, see ``observedFrame``. Not needed for a window that
     ///   is hidden in a corner of the screen
+    /// - Parameter fitting: the window is a tile on the screen: the job of its app fits it into its tile (see
+    ///   ``TileFitting``), `size` is what it's asked for first (``request(forTile:)``)
     @MainActor
-    final func setAxFrame(_ topLeft: CGPoint?, _ size: CGSize?, readBack: Bool = true) {
+    final func setAxFrame(_ topLeft: CGPoint?, _ size: CGSize?, readBack: Bool = true, fitting: TileFitting? = nil) {
         // Placed by something else (e.g. hidden with its workspace, made floating): a slide doesn't take it back
         if !ScrollAnimation.isWriting { ScrollAnimation.stop(self) }
         let frame = SentFrame(topLeft: topLeft, size: size)
@@ -151,68 +155,49 @@ open class Window: TreeNode, Hashable {
         frameGeneration &+= 1
         // Until it's read back: what the window is expected to make of it
         // The layout runs in a refresh session, which updates the focus border at its end
-        if let origin = topLeft ?? observedFrame?.topLeftCorner, let size = size.map(answer(to:)) ?? observedFrame?.size {
+        if let origin = topLeft ?? observedFrame?.topLeftCorner, let size = size.map(expectedSize(of:)) ?? observedFrame?.size {
             setObservedFrame(Rect(topLeftX: origin.x, topLeftY: origin.y, width: size.width, height: size.height), updatesFocusBorder: false)
         }
-        sendAxFrame(topLeft, size, readBack: readBack ? frameGeneration : nil)
+        sendAxFrame(topLeft, size, readBack: readBack ? frameGeneration : nil, fitting: readBack ? fitting : nil)
     }
 
-    /// What the window makes of `size`, as far as it's known: its answer the last time, otherwise `size` itself (most
-    /// windows accept it)
-    private func answer(to size: CGSize) -> CGSize {
-        if let latest = sizeAnswers.latest, latest.asked == size { return latest.got }
-        if let previous = sizeAnswers.previous, previous.asked == size { return previous.got }
-        return size
+    /// What the window makes of `request`, as far as it's known: its answer the last time, otherwise `request` itself
+    /// (most windows accept it)
+    private func expectedSize(of request: CGSize) -> CGSize {
+        fits.first(where: { $0.request == request })?.got ?? request
     }
 
-    private func remember(_ answer: SizeAnswer) {
-        if sizeAnswers.latest?.asked != answer.asked { sizeAnswers.previous = sizeAnswers.latest }
-        sizeAnswers.latest = answer
+    private func remember(_ fit: SizeFit) {
+        fits.removeAll(where: { $0.tile == fit.tile })
+        fits.insert(fit, at: 0)
+        if fits.count > Self.rememberedFits { fits.removeLast() }
     }
 
-    /// The size of the window when the layout asks it for the size of its tile, as far as it's known (see
-    /// ``answer(to:)``). A difference below a point is rounding (tiles aren't whole points), not a refused size: the
-    /// size of the tile itself then, exactly
+    /// What the window made of `tile` the last time, nil if it's not known
+    final func fit(forTile tile: CGSize) -> SizeFit? {
+        fits.first(where: { $0.tile == tile })
+    }
+
+    /// What the window is asked for in `tile`: the size that fits into it, as far as it's known, otherwise the tile
+    final func request(forTile tile: CGSize) -> CGSize {
+        fit(forTile: tile).flatMap { $0.isSettled ? $0.request : nil } ?? tile
+    }
+
+    /// The size of the window in `tile`, as far as it's known (see ``SizeFit/size``)
     final func size(inTile tile: CGSize) -> CGSize {
-        let got = answer(to: tile)
-        return CGSize(
-            width: abs(got.width - tile.width) < 1 ? tile.width : got.width,
-            height: abs(got.height - tile.height) < 1 ? tile.height : got.height,
-        )
-    }
-
-    /// Where the window goes on its tile, from the top left corner of the tile. A window that is at most a gap bigger or
-    /// smaller than its tile only rounds the size of the tile (Terminal takes whole lines and characters): it's centered
-    /// on its tile, so that it reaches as far beyond the tile, or leaves as much of it free, on both sides. A window that
-    /// is further off (a minimum or a maximum size of the app) stays at the start of its tile, where windows are moved
-    /// off each other (see `TilingContainer.layoutTiles`)
-    ///
-    /// - Parameter size: what the window makes of the tile, see ``size(inTile:)``
-    @MainActor
-    static func centering(of size: CGSize, inTile tile: CGSize) -> CGPoint {
-        let gaps = config.gaps.inner
-        func centering(_ length: CGFloat, _ tileLength: CGFloat, gap: Int) -> CGFloat {
-            let difference = length - tileLength
-            return difference != 0 && abs(difference) <= CGFloat(gap) ? -difference / 2 : 0
-        }
-        return CGPoint(
-            x: centering(size.width, tile.width, gap: gaps.horizontal),
-            y: centering(size.height, tile.height, gap: gaps.vertical),
-        )
+        (fit(forTile: tile) ?? .assumed(tile)).size
     }
 
     /// The window reaches beyond the gap after its tile, as far as it's known: it covers a part of the tile next to it.
     /// Windows are moved off each other only then (see `TilingContainer.layoutTiles`). A window that reaches only into
-    /// the gap covers nothing (Terminal snaps to its character grid)
+    /// the gap covers nothing
     @MainActor
     final var isBiggerThanTile: Bool {
         guard let tile = lastAppliedLayoutPhysicalRect?.size else { return false }
-        let size = size(inTile: tile)
-        let gaps = config.gaps.inner
-        return size.width - tile.width > CGFloat(gaps.horizontal) || size.height - tile.height > CGFloat(gaps.vertical)
+        return (fit(forTile: tile) ?? .assumed(tile)).isBiggerThanTile(gaps: config.gaps.inner.size)
     }
 
-    /// The next ``setAxFrame(_:_:readBack:)`` sends the frame even if it's the same as the previous one
+    /// The next ``setAxFrame(_:_:readBack:fitting:)`` sends the frame even if it's the same as the previous one
     @MainActor
     final func invalidateSentFrame() {
         sentFrame = nil
@@ -220,10 +205,23 @@ open class Window: TreeNode, Hashable {
     }
 
     /// - Parameter generation: the send that the frame was read back for
+    /// - Parameter fitted: the job of the app fitted the window into its tile (see ``TileFitting``)
     @MainActor
-    final func frameWasReadBack(_ frame: Rect, generation: UInt, at now: ContinuousClock.Instant = .now) {
+    final func frameWasReadBack(_ frame: Rect, generation: UInt, fitted: FittedFrame? = nil, at now: ContinuousClock.Instant = .now) {
+        // What the window makes of its tile is the app's: learned also if the window was sent another frame or moved
+        // meanwhile (the asks for less move it, macOS reports that)
+        if let fitted {
+            logFitting(fitted)
+            learn(fitted.negotiation.fit, at: now)
+        }
         guard generation == frameGeneration else { return } // Sent again or moved meanwhile: a newer read back follows
-        if let asked = sentFrame?.size { rememberSizeAnswer(asked: asked, got: frame.size, at: now) }
+        if let fitted { // Where the job put it: the next layout with the same fit sends nothing
+            sentFrame = SentFrame(topLeft: fitted.topLeft, size: fitted.negotiation.fit.request)
+        } else if let asked = sentFrame?.size, !fits.contains(where: { $0.isSettled && $0.request == asked && $0.request != $0.tile }) {
+            // E.g. in a corner of the screen: what it made of the size of its tile. A size that fits it into a tile stays
+            // what it is, the window is asked again when it's shown
+            learn(.firstAnswer(tile: asked, got: frame.size, gaps: config.gaps.inner.size), at: now)
+        }
         // It arrives after the session that sent the frame (it doesn't matter if another session is running)
         setObservedFrame(frame, updatesFocusBorder: true)
     }
@@ -233,30 +231,26 @@ open class Window: TreeNode, Hashable {
     private static let maxLayoutRequestsAfterReadBack = 3
     private static let layoutRequestsAfterReadBackQuietInterval: Duration = .seconds(1)
 
-    /// The layout that sent the frame didn't know the answer yet, or the window changed its mind: the windows are laid
-    /// out again if that can move one of them. A window that only rounds the size of its tile moves itself, it's
-    /// centered on its tile (see ``centering(of:inTile:)``). Windows are moved off each other only around a window that
-    /// is bigger than its tile. So a window that is smaller than its tile by more than a gap doesn't cost a refresh
-    /// session.
+    /// The layout that sent the frame didn't know the fit yet, or the window changed its mind: the windows are laid out
+    /// again if that can move one of them. A window on the screen was put at its place by the job of its app (see
+    /// ``TileFitting``), and windows are moved off each other only around a window that is bigger than its tile. So a
+    /// window that only rounds the size of its tile doesn't cost a refresh session.
     ///
-    /// Only a changed answer to a size counts towards ``maxLayoutRequestsAfterReadBack``: the layout that the first
-    /// answer to a size asks for asks the same size again, and knows the answer. The tiles change many times a second
-    /// while a key repeats a resize or a border is dragged, and the last answer counts
+    /// Only a changed fit for a tile counts towards ``maxLayoutRequestsAfterReadBack``: the layout that the first fit
+    /// asks for knows it. The tiles change many times a second while a key repeats a resize or a border is dragged,
+    /// and the last fit counts
     @MainActor
-    private func rememberSizeAnswer(asked: CGSize, got: CGSize, at now: ContinuousClock.Instant) {
-        let isFirstAnswer = sizeAnswers.latest?.asked != asked && sizeAnswers.previous?.asked != asked
-        let assumed = size(inTile: asked)
+    private func learn(_ fit: SizeFit, at now: ContinuousClock.Instant) {
+        let known = self.fit(forTile: fit.tile)
+        if known == fit { return }
         let wasBiggerThanTile = isBiggerThanTile
-        remember(SizeAnswer(asked: asked, got: got))
-        if isFirstAnswer { logAnswerThatReachesIntoTheGaps(asked: asked, got: got) }
-        let answered = size(inTile: asked)
-        guard lastAppliedLayoutPhysicalRect?.size == asked, answered != assumed else { return }
-        guard Self.centering(of: answered, inTile: asked) != Self.centering(of: assumed, inTile: asked) ||
-            wasBiggerThanTile ||
+        remember(fit)
+        guard lastAppliedLayoutPhysicalRect?.size == fit.tile, fit.size != (known ?? .assumed(fit.tile)).size else { return }
+        guard wasBiggerThanTile ||
             nodeWorkspace?.rootTilingContainer.allLeafWindowsRecursive
             .contains(where: { $0.lifeStatus.isInhabited && $0.isBiggerThanTile }) == true
         else { return }
-        if !isFirstAnswer {
+        if known != nil {
             let inARow = layoutRequestsAfterReadBack
                 .flatMap { now - $0.last < Self.layoutRequestsAfterReadBackQuietInterval ? $0.count : nil } ?? 0
             guard inARow < Self.maxLayoutRequestsAfterReadBack else { return }
@@ -265,18 +259,26 @@ open class Window: TreeNode, Hashable {
         scheduleCancellableCompleteRefreshSession(.frameReadBack)
     }
 
-    /// A window that is bigger than its tile by more than half a gap is centered over the gaps (see
-    /// ``centering(of:inTile:)``): the gaps around it look different from the others. Logged, with what it was asked
-    /// for: a Terminal window took a row more than its tile (785 for 777.5), while the same request from outside MarSpace
-    /// got 771. Not explained yet
+    /// A fitting longer than this is logged as an error: the app was slow to answer its asks
+    private static let slowFitting: Duration = .milliseconds(100)
+
+    /// A fitting that asked the window for another size than the first one (the first time it got a tile, or the app
+    /// changed its mind) is logged with every ask. At the debug level (zero cost unless the log is streamed: a dragged
+    /// border gives the window next to it a new tile many times a second), as a notice (kept: `log show` finds it) if it
+    /// didn't get the window into its tile: it reaches into the gaps
     @MainActor
-    private func logAnswerThatReachesIntoTheGaps(asked: CGSize, got: CGSize) {
-        let gaps = config.gaps.inner
-        func reachesIntoTheGaps(_ excess: CGFloat, gap: Int) -> Bool { excess > CGFloat(gap) / 2 && excess <= CGFloat(gap) }
-        guard reachesIntoTheGaps(got.width - asked.width, gap: gaps.horizontal) || reachesIntoTheGaps(got.height - asked.height, gap: gaps.vertical)
-        else { return }
-        let tile = lastAppliedLayoutPhysicalRect.map { "\($0.topLeftX),\($0.topLeftY) \($0.width)x\($0.height)" } ?? "none"
-        layoutLogger.notice("window \(self.windowId, privacy: .public) of \(self.app.name ?? "?", privacy: .public) asked \(asked.debugDescription, privacy: .public) got \(got.debugDescription, privacy: .public) on tile \(tile, privacy: .public): it reaches into the gaps")
+    private func logFitting(_ fitted: FittedFrame) {
+        let negotiation = fitted.negotiation
+        guard negotiation.askedAgain else { return }
+        let fit = negotiation.fit
+        let asks = negotiation.answers.lazy.map { "\($0.request.debugDescription) got \($0.got.debugDescription)" }.joined(separator: ", ")
+        let line = "window \(windowId) of \(app.name ?? "?") in tile \(fit.tile.debugDescription): width \(fit.width), height \(fit.height) after \(negotiation.answers.count) asks (\(asks)) in \(fitted.duration.milliseconds) ms"
+        if fit.width == .notSmaller || fit.height == .notSmaller {
+            layoutLogger.notice("\(line, privacy: .public): it reaches into the gaps")
+        } else {
+            layoutLogger.debug("\(line, privacy: .public)")
+        }
+        if fitted.duration > Self.slowFitting { perfLogger.error("slow size fitting: \(line, privacy: .public)") }
     }
 
     /// - Parameter frame: read from the window just now
@@ -293,24 +295,20 @@ open class Window: TreeNode, Hashable {
         if updatesFocusBorder { FocusBorderController.shared.windowFrameDidChange(self) }
     }
 
-    /// Use ``setAxFrame(_:_:readBack:)``
+    /// Use ``setAxFrame(_:_:readBack:fitting:)``
     ///
-    /// - Parameter readBack: the generation to report the frame with to ``frameWasReadBack(_:generation:)``, nil if
-    ///   it's not needed
+    /// - Parameter readBack: the generation to report the frame with to ``frameWasReadBack(_:generation:fitted:at:)``,
+    ///   nil if it's not needed
+    /// - Parameter fitting: see ``TileFitting``, only with `readBack`
     @MainActor
-    func sendAxFrame(_ topLeft: CGPoint?, _ size: CGSize?, readBack: UInt?) { die("Not implemented") }
+    func sendAxFrame(_ topLeft: CGPoint?, _ size: CGSize?, readBack: UInt?, fitting: TileFitting?) { die("Not implemented") }
 }
 
-// periphery:ignore - the properties are only compared (Equatable)
 private struct SentFrame: Equatable {
+    // periphery:ignore - only compared (Equatable)
     let topLeft: CGPoint?
+    /// What the window was asked for, see `Window.expectedSize(of:)`
     let size: CGSize?
-}
-
-/// What a window made of a size that it was asked for, see `Window.sizeAnswers`
-private struct SizeAnswer {
-    let asked: CGSize
-    let got: CGSize
 }
 
 enum MacosWindowNativeState: Sendable {

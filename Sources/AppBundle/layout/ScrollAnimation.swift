@@ -17,10 +17,13 @@ enum ScrollAnimation {
         let from: CGPoint
         /// Where the slide ends
         let to: CGPoint
+        /// What the window is asked for (see `Window.request(forTile:)`)
         let size: CGSize
         /// The top left corner of the window after the slide: `to`, or the corner of the screen for a column that slid
         /// off it
         let final: CGPoint
+        /// The window is fitted into its tile where the slide ends, nil in a corner of the screen (see `TileFitting`)
+        let fitting: TileFitting?
     }
 
     private static let duration: Duration = .milliseconds(220)
@@ -46,7 +49,7 @@ enum ScrollAnimation {
         let ended = slides.values.filter { !goingOn.contains($0.window.windowId) }
         slides = Dictionary(newSlides.map { ($0.window.windowId, $0) }, uniquingKeysWith: { _, last in last })
         write {
-            for slide in ended { slide.window.setAxFrame(slide.final, slide.size) }
+            for slide in ended { slide.window.setAxFrame(slide.final, slide.size, fitting: slide.fitting) }
             for slide in newSlides { slide.window.setAxFrame(slide.from, slide.size, readBack: false) }
         }
         task?.cancel()
@@ -71,7 +74,7 @@ enum ScrollAnimation {
             let ended = slides.values
             slides = [:]
             write {
-                for slide in ended { slide.window.setAxFrame(slide.final, slide.size) } // Read back: what it made of its tile
+                for slide in ended { slide.window.setAxFrame(slide.final, slide.size, fitting: slide.fitting) } // Read back: what it made of its tile
             }
         }
     }

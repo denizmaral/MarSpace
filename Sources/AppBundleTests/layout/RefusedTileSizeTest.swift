@@ -163,9 +163,9 @@ struct RefusedTileSizeTest {
         assertEquals(appStore.observedFrame, rect(920, 0, 1000, 1079))
     }
 
-    /// Terminal snaps to its character grid: a window that reaches only into the gap after its tile covers nothing, a
-    /// window that is a little smaller leaves only a little of its tile free. They are centered on their tiles, nothing
-    /// else moves. The tiles aren't whole points
+    /// A window that reaches only into the gap after its tile (a minimum just above the tile) covers nothing, a window
+    /// that is a little smaller leaves only a little of its tile free. They are centered on their tiles by the frame
+    /// jobs, right away: nothing else moves, and no layout is asked for. The tiles aren't whole points
     @Test func testWindowsThatRoundTheSizesOfTheirTilesMoveOnlyThemselves() async throws {
         config.gaps = Gaps(inner: .init(vertical: 10, horizontal: 10), outer: .init(left: 13, bottom: 13, top: 13, right: 13))
         let workspace = Workspace.get(byName: name)
@@ -177,14 +177,14 @@ struct RefusedTileSizeTest {
 
         try await layoutTwice(workspace)
         try await workspace.layoutWorkspace()
-        assertEquals(windows.map(\.sentFrames.count), [1, 2, 1, 1, 2])
+        assertEquals(windows.map(\.sentFrames.count), [1, 1, 1, 1, 1])
         for (window, width) in [(windows[1], 375.0), (windows[4], 370.0)] {
             let windowTile = try #require(tile(window))
             assertEquals(window.observedFrame?.topLeftX, windowTile.topLeftX - (width - windowTile.width) / 2)
         }
         assertEquals(windows[0].observedFrame?.topLeftX, tile(windows[0])?.topLeftX)
         assertEquals(windows[2].observedFrame?.topLeftX, tile(windows[2])?.topLeftX)
-        assertEquals(layoutsAskedForByReadBacks, 2)
+        assertEquals(layoutsAskedForByReadBacks, 0)
     }
 
     /// A window between them fills its tile: it keeps its size and moves along
@@ -500,9 +500,9 @@ struct RefusedTileSizeTest {
         )
     }
 
-    /// Terminal takes whole lines and characters. A window that is at most a gap bigger or smaller than its tile is
-    /// centered on it: it reaches as far into the gaps on both sides, or leaves as much of its tile free on both sides.
-    /// The tiles and the sizes that the windows are asked for stay the same
+    /// A window that is at most a gap bigger or smaller than its tile is centered on it: it reaches as far into the gaps
+    /// on both sides (a minimum just above the tile: asking for less doesn't help), or leaves as much of its tile free on
+    /// both sides. The frame job centers it right away, the next layout knows it. The tiles stay the same
     @Test func testWindowThatRoundsTheSizeOfItsTileIsCenteredOnIt() async throws {
         setGaps(inner: 10, outer: (10, 10, 10, 10))
         let workspace = Workspace.get(byName: name)
@@ -512,21 +512,20 @@ struct RefusedTileSizeTest {
         roundsDown.maximumSizeForTest = CGSize(width: 941, height: 1055)
 
         try await workspace.layoutWorkspace()
-        assertEquals(roundsUp.observedFrame, rect(10, 10, 951, 1065)) // The answers aren't known yet
-        assertEquals(layoutsAskedForByReadBacks, 2)
-
-        try await workspace.layoutWorkspace()
         assertEquals(tile(roundsUp), rect(10, 10, 945, 1059))
         assertEquals(tile(roundsDown), rect(965, 10, 945, 1059))
         assertEquals(roundsUp.observedFrame, rect(7, 7, 951, 1065))
         assertEquals(roundsDown.observedFrame, rect(967, 12, 941, 1055))
         let tileSize = CGSize(width: 945, height: 1059)
-        assertEquals([roundsUp, roundsDown].flatMap { $0.sentFrames.compactMap(\.size) }, [tileSize, tileSize, tileSize, tileSize])
+        assertEquals([roundsUp, roundsDown].flatMap { $0.sentFrames.compactMap(\.size) }, [tileSize, tileSize])
+        // Asked for less three times: it's a minimum
+        assertEquals(roundsUp.sizeAsksForTest, [CGSize(width: 939, height: 1053), CGSize(width: 927, height: 1041), CGSize(width: 903, height: 1017)])
+        assertEquals(roundsDown.sizeAsksForTest, [])
 
         // Nothing changes anymore
         try await workspace.layoutWorkspace()
-        assertEquals([roundsUp, roundsDown].map(\.sentFrames.count), [2, 2])
-        assertEquals(layoutsAskedForByReadBacks, 2)
+        assertEquals([roundsUp, roundsDown].map(\.sentFrames.count), [1, 1])
+        assertEquals(layoutsAskedForByReadBacks, 0)
     }
 
     /// A window that is further off than a gap refuses the size of its tile (a maximum size of the app): it stays at the
@@ -574,8 +573,8 @@ struct RefusedTileSizeTest {
     }
 
     /// A key that repeats a resize, or a dragged border: the tile of a window that rounds its size changes many times a
-    /// second. The first answer to every size asks for a layout, also after more than three: the window ends centered
-    @Test func testWindowThatRoundsIsCenteredAfterManyResizesInASecond() async throws {
+    /// second. Every tile is fitted by the frame job, no layout is asked for: the window ends in its last tile, centered
+    @Test func testWindowThatRoundsFitsAfterManyResizesInASecond() async throws {
         setGaps(inner: 10, outer: (5, 10, 5, 10))
         let workspace = Workspace.get(byName: name)
         let terminal = TestWindow.new(id: 1, parent: workspace.rootTilingContainer)
@@ -583,19 +582,19 @@ struct RefusedTileSizeTest {
         let other = TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
         let start = ContinuousClock.now
         // The weights are the lengths with the gaps (1910 together). Terminal makes 952, 959, 973, 987 and 994 of the
-        // widths of its tile, and 1064 of its height (1059)
+        // widths of its tile, and 1064 of its height (1059): asked for less, 1050
         for (step, width) in [950, 960, 970, 985, 995].enumerated() {
             terminal.setWeight(.h, CGFloat(width) + 5)
             other.setWeight(.h, 1905 - CGFloat(width))
             terminal.readBackInstantForTest = start + .milliseconds(100 * step)
             try await workspace.layoutWorkspace()
         }
-        assertEquals(layoutsAskedForByReadBacks, 5)
+        assertEquals(layoutsAskedForByReadBacks, 0)
 
         try await workspace.layoutWorkspace()
         assertEquals(tile(terminal), rect(5, 10, 995, 1059))
-        assertEquals(terminal.observedFrame, rect(5.5, 7.5, 994, 1064))
-        assertEquals(layoutsAskedForByReadBacks, 5)
+        assertEquals(terminal.observedFrame, rect(5, 14.5, 994, 1050)) // 994 is within a point of 995: it fits
+        assertEquals(layoutsAskedForByReadBacks, 0)
     }
 
     /// The columns of a scrolling workspace: a window that rounds the size of its column is centered on it too

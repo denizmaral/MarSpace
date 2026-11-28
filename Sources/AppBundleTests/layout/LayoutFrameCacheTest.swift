@@ -101,8 +101,8 @@ struct LayoutFrameCacheTest {
         try await workspace.layoutWorkspace() // 1920 wide
         TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
         try await workspace.layoutWorkspace() // 960 wide
-        for (frame, generation) in (window.heldReadBacksForTest ?? []).reversed() { // The older one arrives last
-            window.frameWasReadBack(frame, generation: generation)
+        for (frame, generation, fitted) in (window.heldReadBacksForTest ?? []).reversed() { // The older one arrives last
+            window.frameWasReadBack(frame, generation: generation, fitted: fitted)
         }
         assertEquals(window.observedFrame?.width, 960)
     }

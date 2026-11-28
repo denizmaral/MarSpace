@@ -58,10 +58,15 @@ enum AxStats {
 
     /// Since MarSpace started
     static var callsOutsideOfSessions: Counters { outsideOfSessions.withLock { $0 } }
+
+    /// A frame job fitted a window into its tile (see `TileFitting`): `asks` sizes after the first one, in `duration`
+    static func recordSizeFitting(asks: Int, duration: Duration) {
+        session?.recordSizeFitting(asks: asks, duration: duration)
+    }
 }
 
 let perfLogger = Logger(subsystem: aeroSpaceAppId, category: "perf")
-/// What the windows make of the sizes of their tiles, see Window.askAgainIfTheAnswerIsOff
+/// What the windows make of the sizes of their tiles, see Window.logFitting
 let layoutLogger = Logger(subsystem: aeroSpaceAppId, category: "layout")
 
 /// The accessibility calls and the duration of one refresh session. Logged when the session is over and every job that it
@@ -74,6 +79,10 @@ final class SessionAxCost: Sendable {
         var duration: Duration? = nil
         var jobsDuration: Duration? = nil
         var footprintMegabytes: Int? = nil
+        /// See `AxStats.recordSizeFitting(asks:duration:)`
+        var sizeFittings = 0
+        var sizeFittingAsks = 0
+        var sizeFittingDuration: Duration = .zero
     }
 
     private let name: String
@@ -87,6 +96,14 @@ final class SessionAxCost: Sendable {
     var counters: AxStats.Counters { state.withLock { $0.counters } }
 
     func record(_ call: AxStats.Call) { state.withLock { $0.counters.record(call) } }
+
+    func recordSizeFitting(asks: Int, duration: Duration) {
+        state.withLock {
+            $0.sizeFittings += 1
+            $0.sizeFittingAsks += asks
+            $0.sizeFittingDuration += duration
+        }
+    }
 
     /// A job of the session on the thread of an app is done
     func jobDidFinish() {
@@ -106,15 +123,19 @@ final class SessionAxCost: Sendable {
 
     deinit {
         let now = ContinuousClock.now - start
-        let (ax, duration, jobs, footprint) = state.withLock { ($0.counters, $0.duration ?? now, $0.jobsDuration, $0.footprintMegabytes) }
+        let (ax, duration, jobs, footprint, fittings, fittingAsks, fittingDuration) = state.withLock {
+            ($0.counters, $0.duration ?? now, $0.jobsDuration, $0.footprintMegabytes, $0.sizeFittings, $0.sizeFittingAsks, $0.sizeFittingDuration)
+        }
         let jobsDuration = max(duration, jobs ?? duration)
         let outside = AxStats.callsOutsideOfSessions.total
         let queue = wait.map { wait in
             " queuedMs=\(wait.queued.milliseconds) depth=\(wait.depth)" +
                 (wait.coalesced.map { " coalesced=\($0)" } ?? "") + (wait.isRerun.map { " rerun=\($0)" } ?? "")
         } ?? ""
+        // The frames sent on the screen are fitted into their tiles: asks for less, when a window rounds its tile up
+        let fitting = fittings == 0 ? "" : " sizeFittings=\(fittings) sizeFittingAsks=\(fittingAsks) sizeFittingMs=\(fittingDuration.milliseconds)"
         perfLogger.debug(
-            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
+            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public)\(fitting, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
         )
     }
 }
