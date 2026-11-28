@@ -20,13 +20,30 @@ struct BatchedAxReadTest {
         assertEquals(Ax.batchedValue(pointValue).flatMap(Ax.topLeftCornerAttr.getter), point)
     }
 
+    /// One value per attribute, or none: values that aren't one per attribute could land on the wrong attributes
+    @Test func testTheValuesAreOnePerAttributeOrNone() throws {
+        var error = AXError.noValue
+        let errorValue = try #require(unsafe AXValueCreate(.axError, &error))
+        let values = try Ax.batchedValues(.success, [kCFBooleanTrue, errorValue], count: 2).get()
+        assertEquals(values.map { $0 == nil }, [false, true])
+        func failure(_ error: AXError, _ values: [AnyObject]?) -> BatchedReadFailure? {
+            if case .failure(let failure) = Ax.batchedValues(error, values, count: 2) { failure } else { nil }
+        }
+        assertEquals(failure(.success, [kCFBooleanTrue]), .wrongCount(1))
+        assertEquals(failure(.success, nil), .wrongCount(0))
+        assertEquals(failure(.invalidUIElement, nil), .elementGone)
+        assertEquals(failure(.cannotComplete, [kCFBooleanTrue, kCFBooleanTrue]), .other(.cannotComplete))
+    }
+
     @Test func testABatchedReadIsOneRead() {
         var counters = AxStats.Counters()
-        counters.record(.batchedRead(attributes: 2))
+        counters.record(.batchedRead(additionalAttributes: 1))
         counters.record(.read)
-        counters.record(.batchedReadFailure)
+        counters.record(.batchedReadFailure(.elementGone))
+        counters.record(.batchedReadFailure(.other(.cannotComplete)))
         assertEquals(counters.reads, 2)
         assertEquals(counters.attributesCoalesced, 1)
+        assertEquals(counters.batchedReadsOfGoneElements, 1)
         assertEquals(counters.batchedReadFailures, 1)
         assertEquals(counters.total, 2)
     }
@@ -61,9 +78,9 @@ private final class CountingAxElement: AxUiElementMock {
         return value(attr)
     }
 
-    func getAll<each Attr: ReadableAttr>(_ attrs: repeat each Attr) -> (repeat (each Attr).T?) {
+    func getAll<First: ReadableAttr, each Rest: ReadableAttr>(_ first: First, _ rest: repeat each Rest) -> (First.T?, repeat (each Rest).T?) {
         roundTrips += 1
-        return (repeat value(each attrs))
+        return (value(first), repeat value(each rest))
     }
 
     private func value<Attr: ReadableAttr>(_ attr: Attr) -> Attr.T? {

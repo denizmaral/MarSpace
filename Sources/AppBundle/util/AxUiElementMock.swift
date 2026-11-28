@@ -6,12 +6,14 @@ protocol AxUiElementMock {
     func get<Attr: ReadableAttr>(_ attr: Attr) -> Attr.T?
     /// Several attributes at once: one round trip to the app for an `AXUIElement` (see `AxStats`). Each one is nil if
     /// the element doesn't have it, as with `get(_:)`
-    func getAll<each Attr: ReadableAttr>(_ attrs: repeat each Attr) -> (repeat (each Attr).T?)
+    func getAll<First: ReadableAttr, each Rest: ReadableAttr>(_ first: First, _ rest: repeat each Rest) -> (First.T?, repeat (each Rest).T?)
     func containingNativeWindowId() -> CGWindowID?
 }
 
 extension AxUiElementMock {
-    func getAll<each Attr: ReadableAttr>(_ attrs: repeat each Attr) -> (repeat (each Attr).T?) { (repeat get(each attrs)) }
+    func getAll<First: ReadableAttr, each Rest: ReadableAttr>(_ first: First, _ rest: repeat each Rest) -> (First.T?, repeat (each Rest).T?) {
+        (get(first), repeat get(each rest))
+    }
 
     var cast: AXUIElement { self as! AXUIElement }
 

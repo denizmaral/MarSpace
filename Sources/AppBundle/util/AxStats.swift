@@ -19,7 +19,7 @@ enum AxStats {
         /// An attribute, the window of an element, the element at a position
         case read
         /// Several attributes in one round trip (see `AXUIElement.getAll(_:)`): one read
-        case batchedRead(attributes: Int)
+        case batchedRead(additionalAttributes: Int)
         /// An attribute
         case write
         /// E.g. raise a window, press its close button
@@ -27,7 +27,7 @@ enum AxStats {
         /// A notification is subscribed or unsubscribed
         case observer
         /// A batched read that failed as a whole (it's counted as a read too)
-        case batchedReadFailure
+        case batchedReadFailure(BatchedReadFailure)
     }
 
     struct Counters: Sendable, Equatable {
@@ -35,11 +35,13 @@ enum AxStats {
         var writes: Int = 0
         var actions: Int = 0
         var observers: Int = 0
-        /// The attributes that came along in batched reads, beyond the first of each (see `Call.batchedRead(attributes:)`):
+        /// The attributes that came along in batched reads, beyond the first of each (see `Call.batchedRead(additionalAttributes:)`):
         /// the reads that they save where the caller needs every attribute. Not in `total`
         var attributesCoalesced: Int = 0
-        /// Batched reads that the app didn't answer as a whole (a closed window, an app that doesn't support them), see
-        /// `AxStats.recordBatchedReadFailure(_:attributes:)`. Not in `total`, they are reads
+        /// Batched reads of windows that were closed (see `BatchedReadFailure.elementGone`). Not in `total`, they are reads
+        var batchedReadsOfGoneElements: Int = 0
+        /// Batched reads that the app didn't answer otherwise (see `AxStats.recordBatchedReadFailure(_:attributes:)`): an
+        /// app that doesn't support them. Not in `total`, they are reads
         var batchedReadFailures: Int = 0
 
         var total: Int { reads + writes + actions + observers }
@@ -47,10 +49,11 @@ enum AxStats {
         mutating func record(_ call: Call) {
             switch call {
                 case .read: reads += 1
-                case .batchedRead(let attributes):
+                case .batchedRead(let additionalAttributes):
                     reads += 1
-                    attributesCoalesced += max(0, attributes - 1)
-                case .batchedReadFailure: batchedReadFailures += 1
+                    attributesCoalesced += additionalAttributes
+                case .batchedReadFailure(.elementGone): batchedReadsOfGoneElements += 1
+                case .batchedReadFailure(.wrongCount), .batchedReadFailure(.other): batchedReadFailures += 1
                 case .write: writes += 1
                 case .action: actions += 1
                 case .observer: observers += 1
@@ -76,9 +79,9 @@ enum AxStats {
 
     /// The app didn't answer a batched read as a whole. Logged with the error at the debug level: an app that answers single
     /// reads but not batched ones would lose the frames and the native states of its windows
-    static func recordBatchedReadFailure(_ error: AXError, attributes: [String]) {
-        record(.batchedReadFailure)
-        perfLogger.debug("batched read failed: \(attributes, privacy: .public) error=\(error.rawValue)")
+    static func recordBatchedReadFailure(_ failure: BatchedReadFailure, attributes: [String]) {
+        record(.batchedReadFailure(failure))
+        perfLogger.debug("batched read failed: \(attributes, privacy: .public) \(String(describing: failure), privacy: .public)")
     }
 
     /// A frame job fitted a window into its tile (see `TileFitting`): `asks` sizes after the first one, in `duration`
@@ -165,7 +168,7 @@ final class SessionAxCost: Sendable {
         let refresh = (apps.map { " apps=\($0.asked)/\($0.of)" } ?? "") + (nativeStates.map { " nativeStates=\($0)" } ?? "")
         let fitting = fittings == 0 ? "" : " sizeFittings=\(fittings) sizeFittingAsks=\(fittingAsks) sizeFittingMs=\(fittingDuration.milliseconds)"
         perfLogger.debug(
-            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axAttrsCoalesced=\(ax.attributesCoalesced) axBatchFailures=\(ax.batchedReadFailures) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public)\(refresh, privacy: .public)\(fitting, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
+            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axAttrsCoalesced=\(ax.attributesCoalesced) axBatchFailures=\(ax.batchedReadFailures) axBatchesOfGone=\(ax.batchedReadsOfGoneElements) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public)\(refresh, privacy: .public)\(fitting, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
         )
     }
 }
