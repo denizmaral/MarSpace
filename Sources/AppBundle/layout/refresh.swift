@@ -139,8 +139,7 @@ private func lightSession<T>(_ event: RefreshSessionEvent, readOnly: Bool, body:
         WindowPlacementStore.persistIfChanged()
         if !event.isFocusFollowsMouse {
             // The apps that the session touched (see RefreshScope.afterLightSession)
-            let scope: RefreshScope = event.isStartup ? .everything : .afterLightSession(focusBefore: focusBefore, focusAfter: focusAfter)
-            scheduleCancellableCompleteRefreshSession(event, scope: scope)
+            scheduleCancellableCompleteRefreshSession(event, scope: .afterLightSession(event, focusBefore: focusBefore, focusAfter: focusAfter))
         }
         return result
     } }
