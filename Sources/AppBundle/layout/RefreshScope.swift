@@ -132,36 +132,49 @@ extension RefreshScope {
 
 /// The complete refresh sessions since the last one that asked every app (a full sweep): when it was, and whether what
 /// the next one finds was missed by scoping. A change of an app that a full sweep finds was missed (see
-/// `logMissedChange`) only if scoped sessions ran since the last one, and the screen wasn't locked meanwhile: while it
-/// is, the accessibility API sees no windows (see `closedWindowsCache`), they all come back after the unlock, and the
-/// apps don't notify about it
+/// `logMissedChange`) only if scoped sessions ran since the last one, and the lock screen wasn't in front since the
+/// last one started: while it is, the accessibility API sees no windows (see `closedWindowsCache`), they all come back
+/// after the unlock, and the apps don't notify about it
 struct FullSweeps: Sendable {
     /// When the last full sweep ended, nil if none did
     private(set) var last: ContinuousClock.Instant? = nil
     private var scopedSessions = 0
-    private var wasScreenLocked = false
+    /// How often the lock screen was seen in front: its activations, the sessions that ended behind it
+    private(set) var locks: UInt64 = 0
+    /// `locks` when the last full sweep started, nil if it ended behind the lock screen or none did
+    private var locksAtLastSweep: UInt64? = nil
 
-    /// The scope that a session asked for runs with (see `RefreshScope.effective(lastFullSweep:now:)`), and the apps
-    /// that it was asked for if what it finds of the others was missed, nil if it wasn't (see `logMissedChange`)
-    func scope(for requested: RefreshScope, now: ContinuousClock.Instant) -> (scope: RefreshScope, missedOutside: Set<pid_t>?) {
+    /// The scope that a session asked for runs with (see `RefreshScope.effective(lastFullSweep:now:)`), and what it
+    /// reports as missed, nil if nothing (see `logMissedChange`)
+    func scope(for requested: RefreshScope, now: ContinuousClock.Instant) -> (scope: RefreshScope, missed: MissedChanges?) {
         let scope = requested.effective(lastFullSweep: last, now: now)
         let isWidened = scope != requested
-        return (scope, isWidened && scopedSessions > 0 && !wasScreenLocked ? requested.pids : nil)
+        guard isWidened, scopedSessions > 0, locksAtLastSweep == locks, let askedFor = requested.pids else { return (scope, nil) }
+        return (scope, MissedChanges(askedFor: askedFor, locks: locks))
     }
 
     /// A session ended without being canceled
+    /// - Parameter locksAtStart: `locks` when it started
     /// - Parameter isScreenLocked: the lock screen is in front: what the session saw isn't what the apps have
-    mutating func sessionDidSucceed(_ scope: RefreshScope, now: ContinuousClock.Instant, isScreenLocked: Bool) {
+    mutating func sessionDidSucceed(_ scope: RefreshScope, locksAtStart: UInt64, now: ContinuousClock.Instant, isScreenLocked: Bool) {
+        if isScreenLocked { locks += 1 }
         if scope == .everything {
             last = now
             scopedSessions = 0
-            wasScreenLocked = isScreenLocked
+            locksAtLastSweep = isScreenLocked ? nil : locksAtStart
         } else {
             scopedSessions += 1
-            if isScreenLocked { wasScreenLocked = true }
         }
     }
 
     /// The lock screen came to the front (see `GlobalObserver`)
-    mutating func screenDidLock() { wasScreenLocked = true }
+    mutating func screenDidLock() { locks += 1 }
+}
+
+/// What a full sweep after scoped sessions reports as missed (see `FullSweeps`, `logMissedChange`)
+struct MissedChanges: Sendable, Equatable {
+    /// The apps that the session was asked for: what it finds of them wasn't missed
+    let askedFor: Set<pid_t>
+    /// `FullSweeps.locks` when the session started: once the lock screen comes to the front, nothing is reported
+    let locks: UInt64
 }

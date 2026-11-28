@@ -49,7 +49,8 @@ func runHeavyCompleteRefreshSession(
     if !TrayMenuModel.shared.isEnabled { return }
     // Asked for some apps and asks every app, because the last time is too long ago: what it finds of the other apps
     // may have been missed (see logMissedChange)
-    let (scope, missedOutside) = fullSweeps.scope(for: requested, now: .now)
+    let (scope, missed) = fullSweeps.scope(for: requested, now: .now)
+    let locksAtStart = fullSweeps.locks
     let axCost = SessionAxCost("heavy \(event) scope=\(scope)\(scope != requested ? " asked=\(requested)" : "")")
     defer { axCost.sessionDidFinish() }
     let res = await Result {
@@ -63,7 +64,7 @@ func runHeavyCompleteRefreshSession(
             if shouldLayoutWorkspaces && optimisticallyPreLayoutWorkspaces { try await layoutWorkspaces() }
 
             await refreshModel_nonCancellable()
-            if scope != .layout { try await refresh(scope.pids, missedOutside: missedOutside) }
+            if scope != .layout { try await refresh(scope.pids, missed: missed) }
             // The windows were registered one by one, in an arbitrary order: back to their places of the previous run (when
             // the first windows of the previous run are there: the screen may be locked when MarSpace starts)
             WindowPlacementStore.restoreTilingTreesOfPreviousRunIfPending()
@@ -71,7 +72,7 @@ func runHeavyCompleteRefreshSession(
 
             updateTrayText()
             SecureInputPanel.shared.refresh()
-            if scope != .layout { try await normalizeLayoutReason(scope.pids, missedOutside: missedOutside) }
+            if scope != .layout { try await normalizeLayoutReason(scope.pids, missed: missed) }
             // New windows (after the window rules) and windows back from macOS native states
             Workspace.applyFloatingLayouts()
             normalizeContainers()
@@ -82,7 +83,7 @@ func runHeavyCompleteRefreshSession(
     }
     switch res {
         case .success(()):
-            fullSweeps.sessionDidSucceed(scope, now: .now, isScreenLocked: RunningApps.frontmost?.bundleId == lockScreenAppBundleId)
+            fullSweeps.sessionDidSucceed(scope, locksAtStart: locksAtStart, now: .now, isScreenLocked: isScreenLocked)
         case .failure(let err as CancellationError): check(assumeCancellable, "Non cancellable refresh session was canceled: \(err) (\(type(of: err)))")
         case .failure(let err): die("Illegal error: \(err)")
     }
@@ -180,9 +181,9 @@ func refreshModel_nonCancellable() async {
 
 /// - Parameter pids: the apps that are asked for their windows, nil: every app. The windows of the others are what
 ///   MarSpace knows of them
-/// - Parameter missedOutside: see ``logMissedChange(_:_:missedOutside:)``
+/// - Parameter missed: see ``logMissedChange(_:_:missed:)``
 @MainActor
-private func refresh(_ pids: Set<pid_t>?, missedOutside: Set<pid_t>?) async throws {
+private func refresh(_ pids: Set<pid_t>?, missed: MissedChanges?) async throws {
     // Garbage collect terminated apps and windows before working with all windows
     let mapping = try await MacApp
         .refreshAllAndGetAliveWindowIds(frontmostAppBundleId: RunningApps.frontmost?.bundleId, only: pids)
@@ -192,14 +193,14 @@ private func refresh(_ pids: Set<pid_t>?, missedOutside: Set<pid_t>?) async thro
     // again for each of them
     var isWorldCached = false
     for window in MacWindow.allWindows where !aliveWindowIds.contains(window.windowId) {
-        logMissedChange(window.macApp.pid, "window \(window.windowId) closed", missedOutside: missedOutside)
+        logMissedChange(window.macApp.pid, "window \(window.windowId) closed", missed: missed)
         window.lifeStatus = .dead
         if window.garbageCollect(skipClosedWindowsCache: isWorldCached) { isWorldCached = true }
     }
     for (app, windows) in mapping {
         for (windowId, lifeStatus) in windows {
             if MacWindow.allWindowsMap[windowId] == nil {
-                logMissedChange(app.pid, "window \(windowId) appeared", missedOutside: missedOutside)
+                logMissedChange(app.pid, "window \(windowId) appeared", missed: missed)
             }
             try await MacWindow.getOrRegister(windowId: windowId, macApp: app, lifeStatus: lifeStatus).lifeStatus = lifeStatus
         }
@@ -229,14 +230,19 @@ func refreshObs(_: AXObserver, _ ax: AXUIElement, notif: CFString, _: UnsafeMuta
 /// the scoped sessions before it didn't ask (see ``RefreshScope``, ``FullSweeps``): the app didn't notify about it. Logged as a notice
 /// (kept): the events of that app need a look
 ///
-/// - Parameter missedOutside: the apps that the session was asked for, nil if it wasn't asked for some apps only
+/// - Parameter missed: nil if nothing is reported. Nothing either once the lock screen came to the front during the
+///   session: it hides the windows
 @MainActor
-func logMissedChange(_ pid: pid_t, _ change: @autoclosure () -> String, missedOutside: Set<pid_t>?) {
-    guard let missedOutside, !missedOutside.contains(pid) else { return }
+func logMissedChange(_ pid: pid_t, _ change: @autoclosure () -> String, missed: MissedChanges?) {
+    guard let missed, !missed.askedFor.contains(pid), fullSweeps.locks == missed.locks, !isScreenLocked else { return }
     let app = MacApp.allAppsMap[pid]?.name ?? "\(pid)"
     let change = change()
     perfLogger.notice("missed by the scoped refresh sessions: \(change, privacy: .public) of \(app, privacy: .public)")
 }
+
+/// The lock screen is in front (see `FullSweeps`)
+@MainActor
+private var isScreenLocked: Bool { RunningApps.frontmost?.bundleId == lockScreenAppBundleId }
 
 enum OptimalHideCorner {
     case bottomLeftCorner, bottomRightCorner

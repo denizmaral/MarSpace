@@ -76,7 +76,7 @@ Everything runs on `@MainActor`. Use `Task.startUnstructured`, never `Task {}` o
   - The follow-up after a command asks the apps of the focus before and after it plus the frontmost app (`afterLightSession`). A click asks the app under the mouse plus the frontmost app (`afterClick`), and an activation the new and the previous frontmost app (`afterActivation`).
   - Everything else asks every app (`.everything`), and so does any session more than 5 s after the last full one (`fullSweepInterval`).
   - The scopes of a burst, and of a session canceled by a light one, are merged (`SessionQueue`).
-  - A full sweep after scoped sessions logs every change of another app as a `perf` notice ("missed by the scoped refresh sessions"), unless the screen was locked meanwhile (`FullSweeps`). The perf line has `scope=`, `apps=asked/running` and `nativeStates=`.
+  - A full sweep after scoped sessions logs every change of another app as a `perf` notice ("missed by the scoped refresh sessions"), unless the lock screen was in front since the last full sweep started (`FullSweeps`). The perf line has `scope=`, `apps=asked/running` and `nativeStates=`.
 
 Async functions take a `CancellationMode` (`.cancellable` / `.nonCancellable`). The `_nonCancellable` suffix marks functions that must not be cancelled. Use `die`/`check` for invariants.
 
