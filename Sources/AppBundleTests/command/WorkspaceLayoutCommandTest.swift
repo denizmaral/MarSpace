@@ -143,7 +143,7 @@ struct WorkspaceLayoutCommandTest {
         }
         #expect(workspace.rootTilingContainer.allLeafWindowsRecursive[0].focusWindow())
         away.isMacosFullscreenForTest = true
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         #expect(away.parent === workspace.macOsNativeFullscreenWindowsContainer)
 
         for layout in ["scrolling", "floating", "tiling", "scrolling"] {
@@ -151,18 +151,18 @@ struct WorkspaceLayoutCommandTest {
             session(workspace)
         }
         away.isMacosFullscreenForTest = false
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         session(workspace)
         // A column next to the column of its neighbor, after it like in the tiles
         assertEquals(workspace.rootTilingContainer.layoutDescription, .h_scrolling([.window(1), .window(2), .window(3)]))
 
         // Back while the workspace floats: it floats, and it's a tile again when the workspace tiles
         away.isMacosFullscreenForTest = true
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         await run("workspace-layout floating")
         session(workspace)
         away.isMacosFullscreenForTest = false
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         session(workspace)
         assertEquals(away.isFloatedByWorkspaceLayout, true)
         await run("workspace-layout tiling")

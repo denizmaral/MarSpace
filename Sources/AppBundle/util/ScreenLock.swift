@@ -6,10 +6,12 @@ import CoreGraphics
 /// have. The periods of it are counted (an epoch): what one complete refresh session saw is comparable to what another
 /// one saw only if both saw the same epoch, not blind (see `FullSweeps`).
 ///
-/// The one owner of it. The truth is the window server (`isWindowServerBlind`), read where a session decides something
-/// with it; the notifications of the lock and of sleep start a period between the sessions, and the ones of the unlock
-/// and of the wake read the truth again (awake isn't unlocked). The frontmost app isn't it: a lock after the displays
-/// went to sleep doesn't activate the lock screen
+/// The one owner of it. The truth is the window server (`isWindowServerBlind`), read by the full sweeps, the only
+/// sessions that decide something with it. Between two full sweeps, the notifications start a period: sleep and the
+/// session leaving the console (public), and the lock (`screenIsLocked`, undocumented). A lock that doesn't sleep the
+/// displays (Ctrl-Cmd-Q) and ends before the next full sweep is seen only through that undocumented notification. The
+/// notifications of the unlock and of the wake read the truth again (awake isn't unlocked). The frontmost app isn't it:
+/// a lock after the displays went to sleep doesn't activate the lock screen
 @MainActor
 final class ScreenLock {
     static let shared = ScreenLock(readsWindowServer: ScreenLock.isWindowServerBlind)
@@ -27,7 +29,7 @@ final class ScreenLock {
 
     func handle(_ event: LockEvent) {
         switch event {
-            case .blind: _ = observe(isBlind: true)
+            case .blind: _ = observe(isBlind: true) // Whatever the window server says yet: the period begins
             case .mayBeBack: _ = observeNow()
         }
     }
@@ -54,17 +56,18 @@ final class ScreenLock {
 
     private func observe(isBlind: Bool) -> LockPeriods.Snapshot {
         let before = periods.epoch
-        let snapshot = periods.observe(isLocked: isBlind)
+        let snapshot = periods.observe(isBlind: isBlind)
         if snapshot.epoch != before { perfLogger.notice("lock period \(snapshot.epoch) began: the windows aren't comparable across it") }
         return snapshot
     }
 
-    /// Posted by loginwindow when the screen locks and unlocks. Undocumented distributed notifications, an extra: the
-    /// window server tells the truth when a session reads it
+    /// Posted by loginwindow when the screen locks and unlocks. Undocumented distributed notifications: the only signal of
+    /// a lock without sleep between two full sweeps (see above). If macOS stops posting them, such a lock is missed and
+    /// the next widened full sweep reports the windows that came back
     private static let screenIsLocked = Notification.Name("com.apple.screenIsLocked")
     private static let screenIsUnlocked = Notification.Name("com.apple.screenIsUnlocked")
     /// A key of `CGSessionCopyCurrentDictionary`: true while the screen is locked, absent otherwise (read as not locked).
-    /// Undocumented, an extra to the public signals: the session on the console, the displays asleep
+    /// Undocumented, next to the public signals: the session on the console, the displays asleep
     private nonisolated static let sessionScreenIsLockedKey = "CGSSessionScreenIsLocked"
 
     /// The screen is locked, every display sleeps, or the session isn't on the console. No session of the window server:
@@ -72,9 +75,10 @@ final class ScreenLock {
     nonisolated static func isWindowServerBlind() -> Bool {
         guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return true }
         if session[kCGSessionOnConsoleKey] as? Bool == false || session[sessionScreenIsLockedKey] as? Bool == true { return true }
-        var displays = [CGDirectDisplayID](repeating: 0, count: 32)
         var count: UInt32 = 0
-        guard unsafe CGGetOnlineDisplayList(UInt32(displays.count), &displays, &count) == .success, count > 0 else { return true }
+        guard unsafe CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return true }
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard unsafe CGGetOnlineDisplayList(count, &displays, &count) == .success else { return true }
         return displays.prefix(Int(count)).allSatisfy { CGDisplayIsAsleep($0) != 0 }
     }
 }
@@ -91,16 +95,16 @@ enum LockEvent: Sendable {
 struct LockPeriods: Sendable {
     /// Counts the periods: it changes once when one begins
     private(set) var epoch: UInt64 = 0
-    private var isLocked = false
+    private var isBlind = false
 
     struct Snapshot: Sendable, Equatable {
         let epoch: UInt64
-        let isLocked: Bool
+        let isBlind: Bool
     }
 
-    mutating func observe(isLocked: Bool) -> Snapshot {
-        if isLocked && !self.isLocked { epoch += 1 }
-        self.isLocked = isLocked
-        return Snapshot(epoch: epoch, isLocked: isLocked)
+    mutating func observe(isBlind: Bool) -> Snapshot {
+        if isBlind && !self.isBlind { epoch += 1 }
+        self.isBlind = isBlind
+        return Snapshot(epoch: epoch, isBlind: isBlind)
     }
 }

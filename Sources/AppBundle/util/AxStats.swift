@@ -171,16 +171,21 @@ final class SessionAxCost: Sendable {
                 (wait.coalesced.map { " coalesced=\($0)" } ?? "") + (wait.isRerun.map { " rerun=\($0)" } ?? "")
         } ?? ""
         // The frames sent on the screen are fitted into their tiles: asks for less, when a window rounds its tile up
-        // A notice that wasn't reported (the screen was locked) is counted as suppressed
-        let missedLine = missed.map { missed in
-            let isOn = if case .on = missed.check { true } else { false }
-            return " missedCheck=\(missed.check) \(isOn ? "missed" : "missedSuppressed")=\(missed.notices)"
-        } ?? ""
+        let missedLine = Self.missedCheckFields(missed)
         let refresh = (apps.map { " apps=\($0.asked)/\($0.of)" } ?? "") + (nativeStates.map { " nativeStates=\($0)" } ?? "") + missedLine
         let fitting = fittings == 0 ? "" : " sizeFittings=\(fittings) sizeFittingAsks=\(fittingAsks) sizeFittingMs=\(fittingDuration.milliseconds)"
         perfLogger.debug(
             "session=\(self.name, privacy: .public) axReads=\(ax.reads) axAttrsCoalesced=\(ax.attributesCoalesced) axBatchFailures=\(ax.batchedReadFailures) axBatchesOfGone=\(ax.batchedReadsOfGoneElements) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public)\(refresh, privacy: .public)\(fitting, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
         )
+    }
+}
+
+extension SessionAxCost {
+    /// The fields of the perf line of a full sweep: whether it reported the changes of the apps that it wasn't asked for,
+    /// and how many it found. Not reported (the window server was blind): suppressed. Empty for a scoped session
+    static func missedCheckFields(_ missed: (check: MissedCheck, notices: Int)?) -> String {
+        guard let missed else { return "" }
+        return " missedCheck=\(missed.check) \(missed.check == .on ? "missed" : "missedSuppressed")=\(missed.notices)"
     }
 }
 

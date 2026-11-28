@@ -15,11 +15,11 @@ struct NormalizeLayoutReasonTest {
         #expect(!workspace.isVisible)
 
         lastInvisibleWindowsNativeStateCheck = .now // They were checked just now
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         assertEquals(window.layoutReason, .standard)
 
         lastInvisibleWindowsNativeStateCheck = .now - .seconds(6)
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         assertEquals(window.layoutReason, .macos(prevParentKind: .tilingContainer))
         #expect(window.parent === workspace.macOsNativeFullscreenWindowsContainer)
     }
@@ -35,7 +35,7 @@ struct NormalizeLayoutReasonTest {
 
         window.isMacosFullscreenForTest = true
         window.isNativeStateCheckRequested = true // refreshObs: kAXWindowMiniaturizedNotification etc.
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         #expect(window.parent === workspace.macOsNativeFullscreenWindowsContainer)
         assertEquals(window.isNativeStateCheckRequested, false)
 
@@ -51,7 +51,7 @@ struct NormalizeLayoutReasonTest {
         lastInvisibleWindowsNativeStateCheck = .now
         window.isNativeStateCheckRequested = true
         window.onNativeStateReadForTest = { window.isNativeStateCheckRequested = true } // E.g. kAXWindowMiniaturizedNotification
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         assertEquals(window.isNativeStateCheckRequested, true)
     }
 
@@ -61,7 +61,7 @@ struct NormalizeLayoutReasonTest {
         lastInvisibleWindowsNativeStateCheck = .now
         window.isNativeStateCheckRequested = true
         window.onNativeStateReadForTest = { throw CancellationError() }
-        await #expect(throws: CancellationError.self) { try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything))) }
+        await #expect(throws: CancellationError.self) { try await normalizeLayoutReason(missed: MissedChanges.notCollected) }
         assertEquals(window.isNativeStateCheckRequested, true)
     }
 
@@ -72,7 +72,7 @@ struct NormalizeLayoutReasonTest {
         let start = ContinuousClock.now
         lastInvisibleWindowsNativeStateCheck = start - .seconds(6)
         window.onNativeStateReadForTest = { throw CancellationError() }
-        await #expect(throws: CancellationError.self) { try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything))) }
+        await #expect(throws: CancellationError.self) { try await normalizeLayoutReason(missed: MissedChanges.notCollected) }
         #expect(try #require(lastInvisibleWindowsNativeStateCheck) >= start)
     }
 
@@ -91,18 +91,18 @@ struct NormalizeLayoutReasonTest {
         cacheClosedWindowIfNeeded() // A window closed: the layout of all windows is cached
 
         fullscreen.isMacosFullscreenForTest = true
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         #expect(fullscreen.parent === workspace.macOsNativeFullscreenWindowsContainer)
 
         #expect(try await restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow: reappearing))
         #expect(fullscreen.parent is TilingContainer) // The cached layout
 
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         #expect(fullscreen.parent === workspace.macOsNativeFullscreenWindowsContainer)
         assertEquals(workspace.rootTilingContainer.layoutDescription, .h_tiles([.window(2)]))
 
         fullscreen.isMacosFullscreenForTest = false // Back to the tile it was put into
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         assertEquals(workspace.rootTilingContainer.layoutDescription, .h_tiles([.window(1), .window(2)]))
         assertEquals(fullscreen.layoutReason, .standard)
     }
@@ -119,11 +119,11 @@ struct NormalizeLayoutReasonTest {
         let reappearing = TestWindow.new(id: 3, parent: Workspace.get(byName: "other").rootTilingContainer)
         cacheClosedWindowIfNeeded()
         window.isMacosFullscreenForTest = true
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         #expect(try await restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow: reappearing))
 
         window.isMacosFullscreenForTest = false
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         assertEquals(workspace.rootTilingContainer.layoutDescription, .h_tiles([.window(1), .window(2)]))
         assertEquals(window.layoutReason, .standard)
     }
@@ -135,7 +135,7 @@ struct NormalizeLayoutReasonTest {
         window.isMacosFullscreenForTest = true
 
         lastInvisibleWindowsNativeStateCheck = .now
-        try await normalizeLayoutReason(missed: MissedChanges(.scoped(.everything)))
+        try await normalizeLayoutReason(missed: MissedChanges.notCollected)
         #expect(window.parent === workspace.macOsNativeFullscreenWindowsContainer)
     }
 
@@ -154,13 +154,13 @@ struct NormalizeLayoutReasonTest {
         requested.isNativeStateCheckRequested = true
         let anotherApp = TestApp.shared.pid + 1
 
-        try await normalizeLayoutReason([anotherApp], missed: MissedChanges(.scoped(.apps([anotherApp]))))
+        try await normalizeLayoutReason([anotherApp], missed: MissedChanges.notCollected)
         assertEquals(reads, [2])
         assertEquals(other.layoutReason, .standard)
         assertEquals(workspace.rootTilingContainer.layoutDescription, .h_tiles([.window(1)]))
 
         other.onNativeStateReadForTest = { reads.append(other.windowId) }
-        try await normalizeLayoutReason([TestApp.shared.pid], missed: MissedChanges(.scoped(.apps([TestApp.shared.pid]))))
+        try await normalizeLayoutReason([TestApp.shared.pid], missed: MissedChanges.notCollected)
         assertEquals(other.layoutReason, .macos(prevParentKind: .tilingContainer))
     }
 
@@ -172,7 +172,7 @@ struct NormalizeLayoutReasonTest {
         lastInvisibleWindowsNativeStateCheck = before
         window.isNativeStateCheckRequested = true
         window.onNativeStateReadForTest = { throw CancellationError() }
-        await #expect(throws: CancellationError.self) { try await normalizeLayoutReason([], missed: MissedChanges(.scoped(.layout))) }
+        await #expect(throws: CancellationError.self) { try await normalizeLayoutReason([], missed: MissedChanges.notCollected) }
         assertEquals(window.isNativeStateCheckRequested, true)
         assertEquals(lastInvisibleWindowsNativeStateCheck, before)
     }

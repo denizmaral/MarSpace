@@ -148,15 +148,19 @@ struct FullSweeps: Sendable {
     /// - Parameter lock: reads the lock state (see `ScreenLock.observeNow()`)
     func begin(_ requested: RefreshScope, now: ContinuousClock.Instant, lock: () -> LockPeriods.Snapshot) -> SessionPlan {
         let scope = requested.effective(lastFullSweep: last, now: now)
-        guard scope == .everything else { return .scoped(scope) }
+        switch scope {
+            case .layout: return .layout
+            case .apps(let pids): return .apps(pids)
+            case .everything: break
+        }
         let lock = lock()
         guard scope != requested, let askedFor = requested.pids else {
             return .fullSweep(widenedFrom: nil, check: .off(.notWidened), lockAtStart: lock)
         }
         let check: MissedCheck = if cleanEpoch == nil {
             .off(.noCleanSweep)
-        } else if lock.isLocked || cleanEpoch != lock.epoch {
-            .off(.screenLocked)
+        } else if lock.isBlind || cleanEpoch != lock.epoch {
+            .off(.windowServerBlind)
         } else {
             .on
         }
@@ -168,18 +172,20 @@ struct FullSweeps: Sendable {
     mutating func end(_ plan: SessionPlan, now: ContinuousClock.Instant, lock: () -> LockPeriods.Snapshot) -> MissedCheck? {
         guard case .fullSweep(_, let check, let lockAtStart) = plan else { return nil }
         let lock = lock()
-        let isClean = !lockAtStart.isLocked && !lock.isLocked && lockAtStart.epoch == lock.epoch
+        let isClean = !lockAtStart.isBlind && !lock.isBlind && lockAtStart.epoch == lock.epoch
         last = now
         cleanEpoch = isClean ? lock.epoch : nil
-        if check == .on && !isClean { return .off(.screenLocked) }
+        if check == .on && !isClean { return .off(.windowServerBlind) }
         return check
     }
 }
 
 /// What a complete refresh session runs with (see `FullSweeps.begin(_:now:lock:)`)
 enum SessionPlan: Sendable, Equatable {
-    /// Some apps, or the layout only: the last full sweep is recent
-    case scoped(RefreshScope)
+    /// The layout only: the last full sweep is recent
+    case layout
+    /// These apps: the last full sweep is recent
+    case apps(Set<pid_t>)
     /// Every app
     /// - widenedFrom: the apps that the session was asked for, nil if every app
     /// - lockAtStart: the lock state when it began
@@ -187,7 +193,8 @@ enum SessionPlan: Sendable, Equatable {
 
     var scope: RefreshScope {
         switch self {
-            case .scoped(let scope): scope
+            case .layout: .layout
+            case .apps(let pids): .apps(pids)
             case .fullSweep: .everything
         }
     }
@@ -204,7 +211,7 @@ enum MissedCheck: Sendable, Equatable, CustomStringConvertible {
         /// No full sweep that the window server wasn't blind during, to compare with
         case noCleanSweep
         /// The window server was blind since the last full sweep started, or during the session
-        case screenLocked
+        case windowServerBlind
     }
 
     var description: String {
@@ -224,6 +231,9 @@ final class MissedChanges {
     /// app)
     private let askedFor: Set<pid_t>?
     private(set) var notices: [String] = []
+
+    /// Outside of a complete refresh session (the tests): nothing is collected
+    static var notCollected: MissedChanges { MissedChanges(.layout) }
 
     init(_ plan: SessionPlan) {
         askedFor = if case .fullSweep(let widenedFrom?, _, _) = plan { widenedFrom } else { nil }
