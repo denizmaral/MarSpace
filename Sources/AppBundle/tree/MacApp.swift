@@ -328,9 +328,10 @@ final class MacApp: AbstractApp {
     func getMacosWindowNativeState(_ windowId: OpaqueWindowId, _ cm: CancellationMode) async throws -> MacosWindowNativeState? {
         try await answer(cm, orElse: { _ in (Window.get(byId: windowId) as? MacWindow).map(\.nativeStateAsKnown) }) {
             try await $0.withWindow(windowId, cm) { window, job in
-                if window.get(Ax.isFullscreenAttr) == true { return .nativeFullscreen }
-                try job.checkCancellation()
-                if window.get(Ax.minimizedAttr) == true { return .nativeMinimized }
+                // One round trip for both
+                let (isFullscreen, isMinimized) = window.get(Ax.isFullscreenAttr, Ax.minimizedAttr)
+                if isFullscreen == true { return .nativeFullscreen }
+                if isMinimized == true { return .nativeMinimized }
                 return .normal
             }
         }
@@ -682,9 +683,9 @@ extension Dictionary where Key == UInt32 {
 }
 
 private func getAxRect(window: AXUIElement, job: RunLoopJob) throws -> Rect? {
-    guard let topLeftCorner = window.get(Ax.topLeftCornerAttr) else { return nil }
     try job.checkCancellation()
-    guard let size = window.get(Ax.sizeAttr) else { return nil }
+    // One round trip: the position and the size of the same moment
+    guard case let (topLeftCorner?, size?) = window.get(Ax.topLeftCornerAttr, Ax.sizeAttr) else { return nil }
     return Rect(topLeftX: topLeftCorner.x, topLeftY: topLeftCorner.y, width: size.width, height: size.height)
 }
 
