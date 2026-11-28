@@ -49,18 +49,19 @@ struct SizeFit: Sendable, Equatable {
         SizeFit(tile: tile, request: tile, got: tile, width: .fits, height: .fits)
     }
 
-    /// What a window made of the size of its tile, nothing smaller asked (it waits in a corner of the screen)
-    static func firstAnswer(tile: CGSize, got: CGSize, gaps: CGSize) -> SizeFit {
+    /// What a window made of `request` in its tile, nothing smaller asked (it waits in a corner of the screen, or it
+    /// isn't asked for less in this tile anymore: see ``TileFitting/searches``)
+    static func firstAnswer(tile: CGSize, request: CGSize? = nil, got: CGSize, gaps: CGSize) -> SizeFit {
         SizeFit(
             tile: tile,
-            request: tile,
+            request: request ?? tile,
             got: got,
             width: classify(got.width, tile: tile.width, gap: gaps.width),
             height: classify(got.height, tile: tile.height, gap: gaps.height),
         )
     }
 
-    /// See ``firstAnswer(tile:got:gaps:)``
+    /// See ``firstAnswer(tile:request:got:gaps:)``
     fileprivate static func classify(_ got: CGFloat, tile: CGFloat, gap: CGFloat) -> Axis {
         let excess = got - tile
         if abs(excess) <= tolerance { return .fits }
@@ -204,6 +205,9 @@ struct TileFitting: Sendable, Equatable {
     let minOffset: CGPoint
     /// What the window made of this tile the last time, nil if it's not known
     let known: SizeFit?
+    /// The window is asked for less if it rounds the tile up. Not a window that answers the whole frame otherwise than
+    /// the asks for less, every time (see `Window.searchesFit(inTile:)`): every layout would ask again
+    var searches = true
 
     /// Where the window goes with `fit`
     func topLeft(for fit: SizeFit) -> CGPoint {
@@ -224,6 +228,9 @@ struct TileFitting: Sendable, Equatable {
     func negotiate(sent request: CGSize, got: CGSize, _ ask: (CGSize) throws -> CGSize?) rethrows -> SizeFitNegotiation? {
         if let known, known.isSettled, known.request == request, got.isClose(to: known.got) {
             return SizeFitNegotiation(fit: known, answers: [])
+        }
+        guard searches else { // It's placed for what it made of the frame
+            return SizeFitNegotiation(fit: .firstAnswer(tile: tile, request: request, got: got, gaps: gaps), answers: [])
         }
         var search = SizeFitSearch(tile: tile, gaps: gaps)
         var answer = got

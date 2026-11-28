@@ -36,6 +36,10 @@ open class Window: TreeNode, Hashable {
     /// it and closed again. The most recent first
     private var fits: [SizeFit] = []
     private static let rememberedFits = 4
+    /// The fittings in a row that asked the window for less and ended at the fit that was known: it answered the whole
+    /// frame otherwise than the asks for less. See ``searchesFit(inTile:)``
+    private var refits: (tile: CGSize, count: Int)? = nil
+    private static let maxRefits = 2
     /// The refresh sessions that were asked for in a row because of what the window made of its tile. See
     /// ``learn(_:isFitted:at:)``
     private var layoutRequestsAfterReadBack: (count: Int, last: ContinuousClock.Instant)? = nil
@@ -183,6 +187,32 @@ open class Window: TreeNode, Hashable {
         fit(forTile: tile).flatMap { $0.isSettled ? $0.request : nil } ?? tile
     }
 
+    /// The window is asked for less in `tile` if it rounds it up (see ``TileFitting/searches``). Not after
+    /// ``maxRefits`` fittings in a row that ended at the known fit: the window answers the whole frame otherwise than
+    /// the asks for less (Terminal answered 785 to a frame with a height of 777.5, and 771 to the same size alone). Every
+    /// layout would ask again, and the asks move the window, which lays it out again (its notifications). It's placed for
+    /// what it makes of the frame then, until its tile changes
+    final func searchesFit(inTile tile: CGSize) -> Bool {
+        guard let refits, refits.tile == tile else { return true }
+        return refits.count < Self.maxRefits
+    }
+
+    /// See ``searchesFit(inTile:)``
+    @MainActor
+    private func countRefit(_ negotiation: SizeFitNegotiation, known: SizeFit?) {
+        let tile = negotiation.fit.tile
+        guard searchesFit(inTile: tile) else { return }
+        guard negotiation.askedAgain, let known, known.isSettled, negotiation.fit == known else {
+            if refits?.tile == tile { refits = nil } // It answered as known, or something new
+            return
+        }
+        let count = (refits?.tile == tile ? refits?.count ?? 0 : 0) + 1
+        refits = (tile, count)
+        if count == Self.maxRefits {
+            layoutLogger.notice("window \(self.windowId, privacy: .public) of \(self.app.name ?? "?", privacy: .public) answers the frame otherwise than the asks for less in tile \(tile.debugDescription, privacy: .public): it isn't asked for less there anymore")
+        }
+    }
+
     /// The size of the window in `tile`, as far as it's known (see ``SizeFit/size``)
     final func size(inTile tile: CGSize) -> CGSize {
         (fit(forTile: tile) ?? .assumed(tile)).size
@@ -212,6 +242,7 @@ open class Window: TreeNode, Hashable {
         // meanwhile (the asks for less move it, macOS reports that)
         if let fitted {
             logFitting(fitted)
+            countRefit(fitted.negotiation, known: fit(forTile: fitted.negotiation.fit.tile))
             learn(fitted.negotiation.fit, at: now)
         }
         guard generation == frameGeneration else { return } // Sent again or moved meanwhile: a newer read back follows

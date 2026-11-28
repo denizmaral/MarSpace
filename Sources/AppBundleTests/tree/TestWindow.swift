@@ -11,6 +11,9 @@ final class TestWindow: Window, CustomStringConvertible {
     var maximumSizeForTest: CGSize? = nil
     /// Terminal takes whole lines and characters: the size is rounded to whole cells of this size
     var characterGridForTest: CGSize? = nil
+    /// A whole frame is rounded up to the next line, the same size asked alone to the nearest one (Terminal answered 785
+    /// to MarSpace's frame for 777.5, and 771 to the size)
+    var frameAnswersALineMoreForTest = false
     /// The frames read back after sends, delivered by ``deliverReadBacksForTest()``. nil: delivered right away
     var heldReadBacksForTest: [(frame: Rect, generation: UInt, fitted: FittedFrame?)]? = nil
     /// When the frames are read back. nil: now
@@ -47,6 +50,7 @@ final class TestWindow: Window, CustomStringConvertible {
         sentFrames.append((topLeft, size))
         let origin = topLeft ?? axRectForTest?.topLeftCorner ?? .zero
         var applied = apply(size ?? axRectForTest?.size ?? .zero)
+        if frameAnswersALineMoreForTest, let size, let cell = characterGridForTest { applied.height = (size.height / cell.height).rounded(.up) * cell.height }
         var frame = Rect(topLeftX: origin.x, topLeftY: origin.y, width: applied.width, height: applied.height)
         var fitted: FittedFrame? = nil
         // Like the frame job of MacApp: the asks for less, and the place for what the window took
