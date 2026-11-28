@@ -7,7 +7,7 @@ import Common
 /// asks only that app. A window that answered its size changes only the layout.
 ///
 /// Nothing is missed for long: a session is `everything` when the last one that was is older than
-/// ``fullSweepInterval`` (the windows of an app that doesn't notify are seen then, see `RefreshScope.logMissedChanges`).
+/// ``fullSweepInterval`` (the windows of an app that doesn't notify are seen then, see ``FullSweeps``).
 /// The end of a command or a click asks the apps that it touched (see ``afterLightSession(focusBefore:focusAfter:)``,
 /// ``afterClick(at:)``). The events that MarSpace doesn't know the app of (the launch of an app, a Space change, the
 /// settings) are `everything`
@@ -128,4 +128,40 @@ extension RefreshScope {
         let known = Set(pids.compactMap(\.self))
         return known.isEmpty ? .everything : .apps(known)
     }
+}
+
+/// The complete refresh sessions since the last one that asked every app (a full sweep): when it was, and whether what
+/// the next one finds was missed by scoping. A change of an app that a full sweep finds was missed (see
+/// `logMissedChange`) only if scoped sessions ran since the last one, and the screen wasn't locked meanwhile: while it
+/// is, the accessibility API sees no windows (see `closedWindowsCache`), they all come back after the unlock, and the
+/// apps don't notify about it
+struct FullSweeps: Sendable {
+    /// When the last full sweep ended, nil if none did
+    private(set) var last: ContinuousClock.Instant? = nil
+    private var scopedSessions = 0
+    private var wasScreenLocked = false
+
+    /// The scope that a session asked for runs with (see `RefreshScope.effective(lastFullSweep:now:)`), and the apps
+    /// that it was asked for if what it finds of the others was missed, nil if it wasn't (see `logMissedChange`)
+    func scope(for requested: RefreshScope, now: ContinuousClock.Instant) -> (scope: RefreshScope, missedOutside: Set<pid_t>?) {
+        let scope = requested.effective(lastFullSweep: last, now: now)
+        let isWidened = scope != requested
+        return (scope, isWidened && scopedSessions > 0 && !wasScreenLocked ? requested.pids : nil)
+    }
+
+    /// A session ended without being canceled
+    /// - Parameter isScreenLocked: the lock screen is in front: what the session saw isn't what the apps have
+    mutating func sessionDidSucceed(_ scope: RefreshScope, now: ContinuousClock.Instant, isScreenLocked: Bool) {
+        if scope == .everything {
+            last = now
+            scopedSessions = 0
+            wasScreenLocked = isScreenLocked
+        } else {
+            scopedSessions += 1
+            if isScreenLocked { wasScreenLocked = true }
+        }
+    }
+
+    /// The lock screen came to the front (see `GlobalObserver`)
+    mutating func screenDidLock() { wasScreenLocked = true }
 }

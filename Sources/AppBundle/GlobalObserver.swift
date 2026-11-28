@@ -6,6 +6,8 @@ enum GlobalObserver {
         // Third line of defence against lock screen window. See: closedWindowsCache
         // Second and third lines of defence are technically needed only to avoid potential flickering
         if (notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier == lockScreenAppBundleId {
+            // What the next full sweep finds after the unlock wasn't missed by the scoped sessions (see FullSweeps)
+            if notification.name == NSWorkspace.didActivateApplicationNotification { Task.startUnstructured { @MainActor in fullSweeps.screenDidLock() } }
             return
         }
         let notifName = notification.name.rawValue

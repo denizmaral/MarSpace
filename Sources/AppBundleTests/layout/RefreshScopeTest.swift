@@ -65,6 +65,32 @@ struct RefreshScopeTest {
         assertEquals(RefreshScope.afterLightSession(.startup, focusBefore: window, focusAfter: window), .everything)
     }
 
+    /// What a full sweep finds was missed only after scoped sessions, and not after the lock screen
+    @Test func testMissedChangesAfterScopedSessionsOnly() {
+        let start = ContinuousClock.now
+        var sweeps = FullSweeps()
+        assertEquals(sweeps.scope(for: .apps([1]), now: start).scope, .everything) // None yet
+        assertEquals(sweeps.scope(for: .apps([1]), now: start).missedOutside, nil)
+        sweeps.sessionDidSucceed(.everything, now: start, isScreenLocked: false)
+        assertEquals(sweeps.scope(for: .apps([1]), now: start + .seconds(1)).scope, .apps([1]))
+
+        let late = start + RefreshScope.fullSweepInterval
+        assertEquals(sweeps.scope(for: .apps([1]), now: late).missedOutside, nil) // No scoped session ran: nothing missed
+        sweeps.sessionDidSucceed(.apps([1]), now: start + .seconds(1), isScreenLocked: false)
+        assertEquals(sweeps.scope(for: .apps([1]), now: late).scope, .everything)
+        assertEquals(sweeps.scope(for: .apps([1]), now: late).missedOutside, [1])
+        assertEquals(sweeps.scope(for: .everything, now: late).missedOutside, nil) // Asked for every app
+
+        sweeps.screenDidLock()
+        assertEquals(sweeps.scope(for: .apps([1]), now: late).missedOutside, nil)
+        sweeps.sessionDidSucceed(.everything, now: late, isScreenLocked: true) // A full sweep behind the lock screen
+        sweeps.sessionDidSucceed(.apps([1]), now: late, isScreenLocked: false)
+        assertEquals(sweeps.scope(for: .apps([1]), now: late + RefreshScope.fullSweepInterval).missedOutside, nil)
+        sweeps.sessionDidSucceed(.everything, now: late + RefreshScope.fullSweepInterval, isScreenLocked: false) // Unlocked
+        sweeps.sessionDidSucceed(.layout, now: late + RefreshScope.fullSweepInterval, isScreenLocked: false)
+        assertEquals(sweeps.scope(for: .layout, now: late + RefreshScope.fullSweepInterval * 2).missedOutside, [])
+    }
+
     /// The apps that are known, every app if none is
     @Test func testTheKnownAppsAreAsked() {
         assertEquals(RefreshScope.of([1, nil, 2, 1]), .apps([1, 2]))

@@ -14,9 +14,9 @@ private var isStartupSessionOver = false
 /// The scopes of ``completeRefreshSessionsAskedForInTests``
 @MainActor var completeRefreshScopesAskedForInTests: [RefreshScope] = []
 
-/// When the last complete refresh session that asked every app ended (see ``RefreshScope/effective(lastFullSweep:now:)``)
+/// The complete refresh sessions since the last one that asked every app (see ``FullSweeps``)
 @MainActor
-private var lastFullSweep: ContinuousClock.Instant? = nil
+var fullSweeps = FullSweeps()
 
 /// - Parameter scope: what may have changed, see ``RefreshScope``
 @MainActor
@@ -47,10 +47,9 @@ func runHeavyCompleteRefreshSession(
     defer { signposter.endInterval(#function, state) }
     defer { if event.isStartup { isStartupSessionOver = true } }
     if !TrayMenuModel.shared.isEnabled { return }
-    let scope = requested.effective(lastFullSweep: lastFullSweep, now: .now)
     // Asked for some apps and asks every app, because the last time is too long ago: what it finds of the other apps
-    // was missed (see logMissedChange)
-    let missedOutside = scope != requested ? requested.pids : nil
+    // may have been missed (see logMissedChange)
+    let (scope, missedOutside) = fullSweeps.scope(for: requested, now: .now)
     let axCost = SessionAxCost("heavy \(event) scope=\(scope)\(scope != requested ? " asked=\(requested)" : "")")
     defer { axCost.sessionDidFinish() }
     let res = await Result {
@@ -82,7 +81,8 @@ func runHeavyCompleteRefreshSession(
         } }
     }
     switch res {
-        case .success(()): if scope == .everything { lastFullSweep = .now }
+        case .success(()):
+            fullSweeps.sessionDidSucceed(scope, now: .now, isScreenLocked: RunningApps.frontmost?.bundleId == lockScreenAppBundleId)
         case .failure(let err as CancellationError): check(assumeCancellable, "Non cancellable refresh session was canceled: \(err) (\(type(of: err)))")
         case .failure(let err): die("Illegal error: \(err)")
     }
@@ -226,7 +226,7 @@ func refreshObs(_: AXObserver, _ ax: AXUIElement, notif: CFString, _: UnsafeMuta
 }
 
 /// A complete refresh session that asks every app, because the last one is too long ago, found a change of an app that
-/// the scoped sessions before it didn't ask (see ``RefreshScope``): the app didn't notify about it. Logged as a notice
+/// the scoped sessions before it didn't ask (see ``RefreshScope``, ``FullSweeps``): the app didn't notify about it. Logged as a notice
 /// (kept): the events of that app need a look
 ///
 /// - Parameter missedOutside: the apps that the session was asked for, nil if it wasn't asked for some apps only
