@@ -54,14 +54,36 @@ struct RefreshScopeTest {
         assertEquals(Set(completeRefreshScopesAskedForInTests), [.layout])
     }
 
-    /// The session after a command asks the apps of the focus before and after it, and the frontmost one
+    /// The session after a command asks the apps of the focus before and after it, and the frontmost one. The startup
+    /// asks every app
     @Test func testAfterACommandTheAppsOfTheFocusAreAsked() {
         let window = TestWindow.new(id: 1, parent: Workspace.get(byName: "RefreshScopeTest").rootTilingContainer)
-        let scope = RefreshScope.afterLightSession(focusBefore: nil, focusAfter: window)
+        let scope = RefreshScope.afterLightSession(.hotkeyBinding, focusBefore: nil, focusAfter: window)
         guard case .apps(let pids) = scope else { Issue.record("\(scope)"); return }
         assertEquals(pids.contains(TestApp.shared.pid), true)
         if let frontmost = RunningApps.frontmost?.pid { assertEquals(pids.contains(frontmost), true) }
-        assertEquals(pids.count <= 2, true)
+        assertEquals(RefreshScope.afterLightSession(.startup, focusBefore: window, focusAfter: window), .everything)
+    }
+
+    /// The apps that are known, every app if none is
+    @Test func testTheKnownAppsAreAsked() {
+        assertEquals(RefreshScope.of([1, nil, 2, 1]), .apps([1, 2]))
+        assertEquals(RefreshScope.of([nil, nil]), .everything)
+    }
+
+    /// The window that a click closed isn't on the screen anymore at the mouse up: MarSpace still has it there, its app
+    /// is asked
+    @Test func testAfterAClickTheAppsOfTheWindowsUnderTheMouseAreAsked() async throws {
+        let workspace = Workspace.get(byName: "RefreshScopeTest")
+        #expect(workspace.focusWorkspace())
+        let window = TestWindow.new(id: 1, parent: workspace.rootTilingContainer)
+        try await workspace.layoutWorkspace()
+        let frame = try #require(window.observedFrame)
+        let inside = CGPoint(x: frame.topLeftX + 5, y: frame.topLeftY + 5)
+        assertEquals(RefreshScope.windowsOnTheScreen(at: inside).map(\.windowId), [1])
+        guard case .apps(let pids) = RefreshScope.afterClick(at: inside) else { Issue.record("not apps"); return }
+        assertEquals(pids.contains(TestApp.shared.pid), true)
+        assertEquals(RefreshScope.windowsOnTheScreen(at: CGPoint(x: -100, y: -100)).isEmpty, true)
     }
 
     /// The session after an activation asks the app that got the focus
@@ -69,5 +91,7 @@ struct RefreshScopeTest {
         assertEquals(RefreshScope.afterActivation(of: nil), .everything)
         guard case .apps(let pids) = RefreshScope.afterActivation(of: 12345) else { Issue.record("not apps"); return }
         assertEquals(pids.contains(12345), true)
+        let history = RunningApps.frontmostHistory
+        for pid in [history.pid, history.previousPid].compactMap(\.self) { assertEquals(pids.contains(pid), true) }
     }
 }

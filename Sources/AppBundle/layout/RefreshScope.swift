@@ -90,17 +90,29 @@ extension RefreshScope {
     /// it, and the frontmost app. What the command does to the windows of other apps (moves them, hides them in a corner)
     /// is the layout, it doesn't need their window lists: their notifications ask for them if they change. Every app
     /// if none is known
+    ///
+    /// - Parameter event: the startup sessions ask every app
     @MainActor
-    static func afterLightSession(focusBefore: Window?, focusAfter: Window?) -> RefreshScope {
-        of([focusBefore?.app.pid, focusAfter?.app.pid, RunningApps.frontmost?.pid])
+    static func afterLightSession(_ event: RefreshSessionEvent, focusBefore: Window?, focusAfter: Window?) -> RefreshScope {
+        if event.isStartup { return .everything }
+        return of([focusBefore?.app.pid, focusAfter?.app.pid, RunningApps.frontmost?.pid])
     }
 
-    /// The complete refresh session after a click: the app of the window under the mouse (the close button of a window
-    /// that isn't focused, a new window that its app opens), and the frontmost app
+    /// The complete refresh session after a click: the apps of the windows under the mouse (the close button of a window
+    /// that isn't focused, a new window that its app opens), and the frontmost app. The window that the click closed is
+    /// gone from the screen at the mouse up: the windows under the mouse are also the ones that MarSpace has there (no
+    /// accessibility calls)
     /// - Parameter location: of the mouse, in the coordinates of the accessibility API (the origin at the top left)
     @MainActor
     static func afterClick(at location: CGPoint) -> RefreshScope {
-        of([topmostWindow(at: location)?.pid, RunningApps.frontmost?.pid])
+        of(windowsOnTheScreen(at: location).map(\.app.pid) + [topmostWindow(at: location)?.pid, RunningApps.frontmost?.pid])
+    }
+
+    /// The windows of the workspaces that are shown whose frame (as MarSpace knows it) contains `location`
+    @MainActor
+    static func windowsOnTheScreen(at location: CGPoint) -> [Window] {
+        Workspace.all.filter(\.isVisible).flatMap(\.allLeafWindowsRecursive)
+            .filter { $0.observedFrame?.contains(location) == true }
     }
 
     /// An app was activated: the windows of the app that got the focus, and of the one that had it
@@ -111,7 +123,8 @@ extension RefreshScope {
         return of([pid, history.pid, history.previousPid])
     }
 
-    private static func of(_ pids: [pid_t?]) -> RefreshScope {
+    /// The apps that are known among §pids§, every app if none is
+    static func of(_ pids: [pid_t?]) -> RefreshScope {
         let known = Set(pids.compactMap(\.self))
         return known.isEmpty ? .everything : .apps(known)
     }
