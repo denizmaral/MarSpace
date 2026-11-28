@@ -1,3 +1,4 @@
+import ApplicationServices
 import Common
 import os
 import Synchronization
@@ -17,7 +18,7 @@ enum AxStats {
     enum Call {
         /// An attribute, the window of an element, the element at a position
         case read
-        /// Several attributes in one round trip (see `AXUIElement.get(_:_:)`): a read, and the reads that it saves
+        /// Several attributes in one round trip (see `AXUIElement.getAll(_:)`): one read
         case batchedRead(attributes: Int)
         /// An attribute
         case write
@@ -25,6 +26,8 @@ enum AxStats {
         case action
         /// A notification is subscribed or unsubscribed
         case observer
+        /// A batched read that failed as a whole (it's counted as a read too)
+        case batchedReadFailure
     }
 
     struct Counters: Sendable, Equatable {
@@ -32,8 +35,12 @@ enum AxStats {
         var writes: Int = 0
         var actions: Int = 0
         var observers: Int = 0
-        /// The reads that batched reads saved (see `Call.batchedRead(attributes:)`), not in `total`
-        var readsSaved: Int = 0
+        /// The attributes that came along in batched reads, beyond the first of each (see `Call.batchedRead(attributes:)`):
+        /// the reads that they save where the caller needs every attribute. Not in `total`
+        var attributesCoalesced: Int = 0
+        /// Batched reads that the app didn't answer as a whole (a closed window, an app that doesn't support them), see
+        /// `AxStats.recordBatchedReadFailure(_:attributes:)`. Not in `total`, they are reads
+        var batchedReadFailures: Int = 0
 
         var total: Int { reads + writes + actions + observers }
 
@@ -42,7 +49,8 @@ enum AxStats {
                 case .read: reads += 1
                 case .batchedRead(let attributes):
                     reads += 1
-                    readsSaved += attributes - 1
+                    attributesCoalesced += max(0, attributes - 1)
+                case .batchedReadFailure: batchedReadFailures += 1
                 case .write: writes += 1
                 case .action: actions += 1
                 case .observer: observers += 1
@@ -65,6 +73,13 @@ enum AxStats {
 
     /// Since MarSpace started
     static var callsOutsideOfSessions: Counters { outsideOfSessions.withLock { $0 } }
+
+    /// The app didn't answer a batched read as a whole. Logged with the error at the debug level: an app that answers single
+    /// reads but not batched ones would lose the frames and the native states of its windows
+    static func recordBatchedReadFailure(_ error: AXError, attributes: [String]) {
+        record(.batchedReadFailure)
+        perfLogger.debug("batched read failed: \(attributes, privacy: .public) error=\(error.rawValue)")
+    }
 
     /// A frame job fitted a window into its tile (see `TileFitting`): `asks` sizes after the first one, in `duration`
     static func recordSizeFitting(asks: Int, duration: Duration) {
@@ -92,7 +107,7 @@ final class SessionAxCost: Sendable {
         var sizeFittingDuration: Duration = .zero
         /// A complete refresh session: the apps that it asked for their windows, of the running ones (see RefreshScope)
         var appsAsked: (asked: Int, of: Int)? = nil
-        /// A complete refresh session: the windows whose native state it read (2 reads each)
+        /// A complete refresh session: the windows whose native state it read (one batched read each)
         var nativeStateReads: Int? = nil
     }
 
@@ -150,7 +165,7 @@ final class SessionAxCost: Sendable {
         let refresh = (apps.map { " apps=\($0.asked)/\($0.of)" } ?? "") + (nativeStates.map { " nativeStates=\($0)" } ?? "")
         let fitting = fittings == 0 ? "" : " sizeFittings=\(fittings) sizeFittingAsks=\(fittingAsks) sizeFittingMs=\(fittingDuration.milliseconds)"
         perfLogger.debug(
-            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axReadsSaved=\(ax.readsSaved) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public)\(refresh, privacy: .public)\(fitting, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
+            "session=\(self.name, privacy: .public) axReads=\(ax.reads) axAttrsCoalesced=\(ax.attributesCoalesced) axBatchFailures=\(ax.batchedReadFailures) axWrites=\(ax.writes) axActions=\(ax.actions) axObservers=\(ax.observers) ms=\(duration.milliseconds) jobsMs=\(jobsDuration.milliseconds)\(queue, privacy: .public)\(refresh, privacy: .public)\(fitting, privacy: .public) footprintMB=\(footprint ?? -1) outsideOfSessions=\(outside)",
         )
     }
 }

@@ -364,17 +364,23 @@ extension AXUIElement: AxUiElementMock {
             : nil
     }
 
-    /// Two attributes in one round trip to the app (`AXUIElementCopyMultipleAttributeValues`), instead of two (see
-    /// `AxStats`). Each one is nil if the app doesn't have it, as with `get(_:)`
-    func get<A: ReadableAttr, B: ReadableAttr>(_ a: A, _ b: B) -> (A.T?, B.T?) {
-        let state = signposter.beginInterval(#function, "attrs: \(a.key) \(b.key) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
+    /// One round trip to the app (`AXUIElementCopyMultipleAttributeValues`), instead of one per attribute
+    func getAll<each Attr: ReadableAttr>(_ attrs: repeat each Attr) -> (repeat (each Attr).T?) {
+        var keys: [String] = []
+        for attr in repeat each attrs { keys.append(attr.key) }
+        let state = signposter.beginInterval(#function, "attrs: \(keys) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
         defer { signposter.endInterval(#function, state) }
-        AxStats.record(.batchedRead(attributes: 2))
+        AxStats.record(.batchedRead(attributes: keys.count))
         var raw: CFArray?
-        guard unsafe AXUIElementCopyMultipleAttributeValues(self, [a.key, b.key] as CFArray, [], &raw) == .success,
-              let values = raw as [AnyObject]?, values.count == 2
-        else { return (nil, nil) }
-        return (attributeValue(values[0]).flatMap(a.getter), attributeValue(values[1]).flatMap(b.getter))
+        let error = unsafe AXUIElementCopyMultipleAttributeValues(self, keys as CFArray, [], &raw)
+        let values = error == .success ? (raw as [AnyObject]?) ?? [] : []
+        if values.count != keys.count { AxStats.recordBatchedReadFailure(error, attributes: keys) }
+        var index = 0
+        func value<A: ReadableAttr>(_ attr: A) -> A.T? {
+            defer { index += 1 }
+            return values.indices.contains(index) ? Ax.batchedValue(values[index]).flatMap(attr.getter) : nil
+        }
+        return (repeat value(each attrs))
     }
 
     @discardableResult func set<Attr: WritableAttr>(_ attr: Attr, _ value: Attr.T) -> Bool {
@@ -410,12 +416,14 @@ extension AXUIElement: AxUiElementMock {
     }
 }
 
-/// A value of `AXUIElementCopyMultipleAttributeValues`: an attribute that the element doesn't have is an error value
-/// in the array (the getters of the attributes don't take it)
-func attributeValue(_ value: AnyObject) -> AnyObject? {
-    if value is NSNull { return nil }
-    if CFGetTypeID(value) == AXValueGetTypeID(), AXValueGetType(unsafe unsafeDowncast(value, to: AXValue.self)) == .axError { return nil }
-    return value
+extension Ax {
+    /// A value of `AXUIElementCopyMultipleAttributeValues`: an attribute that the element doesn't have is an error value
+    /// in the array (the getters of the attributes don't take it, the one of the position would fail its check)
+    static func batchedValue(_ value: AnyObject) -> AnyObject? {
+        if value is NSNull { return nil }
+        if CFGetTypeID(value) == AXValueGetTypeID(), AXValueGetType(unsafe unsafeDowncast(value, to: AXValue.self)) == .axError { return nil }
+        return value
+    }
 }
 
 extension AXObserver {

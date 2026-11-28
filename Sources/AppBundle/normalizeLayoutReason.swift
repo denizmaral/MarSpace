@@ -7,7 +7,7 @@ import AppKit
 /// - Parameter missedOutside: see `logMissedChange(_:_:missedOutside:)`
 @MainActor func normalizeLayoutReason(_ pids: Set<pid_t>? = nil, missedOutside: Set<pid_t>? = nil) async throws {
     // Windows of invisible workspaces are hidden in the corner of the screen, their native state rarely changes. Saves
-    // 2 AX calls per window per refresh session. They are checked:
+    // a round trip per window per refresh session (see nativeState(of:)). They are checked:
     // - when AX notifies about a native state change (e.g. "Minimize All"), see refreshObs, or AeroSpace changes it
     // - when they are already in a native macOS state (the user can leave it)
     // - at most every 5 seconds, as a safety net
