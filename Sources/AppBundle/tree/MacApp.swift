@@ -382,6 +382,8 @@ final class MacApp: AbstractApp {
             // The apps that aren't asked keep the windows that MarSpace knows of them: gathered in one pass
             if pids != nil {
                 for window in MacWindow.allWindowsMap.values where !(pids?.contains(window.macApp.pid) ?? true) {
+                    // The app quit (destroyed above): its windows are garbage collected
+                    guard MacApp.allAppsMap[window.macApp.pid] === window.macApp else { continue }
                     result[window.macApp, default: [:]][window.windowId] = window.lifeStatus
                 }
             }
