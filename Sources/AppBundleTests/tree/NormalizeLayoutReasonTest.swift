@@ -138,4 +138,42 @@ struct NormalizeLayoutReasonTest {
         try await normalizeLayoutReason()
         #expect(window.parent === workspace.macOsNativeFullscreenWindowsContainer)
     }
+
+    /// A session of other apps (see RefreshScope) doesn't read the windows that are shown, only a window that a
+    /// notification asked for. The app of the session is read
+    @Test func testScopedSessionReadsOnlyItsAppsAndTheRequestedWindows() async throws {
+        let workspace = Workspace.get(byName: "shown")
+        #expect(workspace.focusWorkspace())
+        let other = TestWindow.new(id: 1, parent: workspace.rootTilingContainer)
+        let requested = TestWindow.new(id: 2, parent: workspace.rootTilingContainer)
+        var reads: [OpaqueWindowId] = []
+        for window in [other, requested] {
+            window.isMacosFullscreenForTest = true
+            window.onNativeStateReadForTest = { reads.append(window.windowId) }
+        }
+        requested.isNativeStateCheckRequested = true
+        let anotherApp = TestApp.shared.pid + 1
+
+        try await normalizeLayoutReason([anotherApp])
+        assertEquals(reads, [2])
+        assertEquals(other.layoutReason, .standard)
+        assertEquals(workspace.rootTilingContainer.layoutDescription, .h_tiles([.window(1)]))
+
+        other.onNativeStateReadForTest = { reads.append(other.windowId) }
+        try await normalizeLayoutReason([TestApp.shared.pid])
+        assertEquals(other.layoutReason, .macos(prevParentKind: .tilingContainer))
+    }
+
+    /// A scoped session that is canceled during the reads keeps the request, and doesn't check the windows of workspaces
+    /// that aren't shown, nor take their turn
+    @Test func testCanceledScopedSessionKeepsTheRequest() async throws {
+        let window = TestWindow.new(id: 1, parent: Workspace.get(byName: "invisible").rootTilingContainer)
+        let before = ContinuousClock.now - .seconds(10)
+        lastInvisibleWindowsNativeStateCheck = before
+        window.isNativeStateCheckRequested = true
+        window.onNativeStateReadForTest = { throw CancellationError() }
+        await #expect(throws: CancellationError.self) { try await normalizeLayoutReason([]) }
+        assertEquals(window.isNativeStateCheckRequested, true)
+        assertEquals(lastInvisibleWindowsNativeStateCheck, before)
+    }
 }
