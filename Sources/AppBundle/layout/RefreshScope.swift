@@ -8,8 +8,9 @@ import Common
 ///
 /// Nothing is missed for long: a session is `everything` when the last one that was is older than
 /// ``fullSweepInterval`` (the windows of an app that doesn't notify are seen then, see `RefreshScope.logMissedChanges`).
-/// The events that MarSpace doesn't know the app of (NSWorkspace, the mouse, the settings, the end of a command) are
-/// `everything` too
+/// The end of a command or a click asks the apps that it touched (see ``afterLightSession(focusBefore:focusAfter:)``,
+/// ``afterClick(at:)``). The events that MarSpace doesn't know the app of (the launch of an app, a Space change, the
+/// settings) are `everything`
 enum RefreshScope: Sendable, Hashable, CustomStringConvertible {
     /// Only the layout may change: a window answered its size (see `RefreshSessionEvent.frameReadBack`)
     case layout
@@ -81,5 +82,37 @@ extension RefreshScope {
         if isInNativeState || isCheckRequested { return true }
         if let pids, !pids.contains(windowPid) { return false }
         return isWorkspaceVisible || checksInvisible
+    }
+}
+
+extension RefreshScope {
+    /// The complete refresh session after a light session (a command, a hotkey): the apps of the focus before and after
+    /// it, and the frontmost app. What the command does to the windows of other apps (moves them, hides them in a corner)
+    /// is the layout, it doesn't need their window lists: their notifications ask for them if they change. Every app
+    /// if none is known
+    @MainActor
+    static func afterLightSession(focusBefore: Window?, focusAfter: Window?) -> RefreshScope {
+        of([focusBefore?.app.pid, focusAfter?.app.pid, RunningApps.frontmost?.pid])
+    }
+
+    /// The complete refresh session after a click: the app of the window under the mouse (the close button of a window
+    /// that isn't focused, a new window that its app opens), and the frontmost app
+    /// - Parameter location: of the mouse, in the coordinates of the accessibility API (the origin at the top left)
+    @MainActor
+    static func afterClick(at location: CGPoint) -> RefreshScope {
+        of([topmostWindow(at: location)?.pid, RunningApps.frontmost?.pid])
+    }
+
+    /// An app was activated: the windows of the app that got the focus, and of the one that had it
+    @MainActor
+    static func afterActivation(of pid: pid_t?) -> RefreshScope {
+        guard let pid else { return .everything }
+        let history = RunningApps.frontmostHistory // It may follow the notification or not yet
+        return of([pid, history.pid, history.previousPid])
+    }
+
+    private static func of(_ pids: [pid_t?]) -> RefreshScope {
+        let known = Set(pids.compactMap(\.self))
+        return known.isEmpty ? .everything : .apps(known)
     }
 }

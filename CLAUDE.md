@@ -72,7 +72,9 @@ Everything runs on `@MainActor`. Use `Task.startUnstructured`, never `Task {}` o
 - **`runLightSession`**: wraps each CLI command and hotkey. It refreshes the model, runs the body, lays out workspaces, syncs focus to macOS, then schedules a heavy refresh.
 - **`runHeavyCompleteRefreshSession`**: triggered by accessibility observer events (`GlobalObserver.swift`). It detects new or closed windows, normalizes, and lays out.
 - **`RefreshScope`** (`layout/RefreshScope.swift`): what a heavy session asks the apps.
-  - An accessibility notification asks only its app (`.apps`), and a window's size read-back only lays out (`.layout`). Everything else asks every app (`.everything`), and so does any session more than 5 s after the last full one (`fullSweepInterval`).
+  - An accessibility notification asks only its app (`.apps`), and a window's size read-back only lays out (`.layout`).
+  - The follow-up after a command asks the apps of the focus before and after it plus the frontmost app (`afterLightSession`). A click asks the app under the mouse plus the frontmost app (`afterClick`), and an activation the new and the previous frontmost app (`afterActivation`).
+  - Everything else asks every app (`.everything`), and so does any session more than 5 s after the last full one (`fullSweepInterval`).
   - The scopes of a burst, and of a session canceled by a light one, are merged (`SessionQueue`).
   - A full sweep after scoped sessions logs every change of another app as a `perf` notice ("missed by the scoped refresh sessions"). The perf line has `scope=`, `apps=asked/running` and `nativeStates=`.
 
