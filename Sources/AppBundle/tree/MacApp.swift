@@ -198,20 +198,26 @@ final class MacApp: AbstractApp {
         }
     }
 
-    /// - Parameter readBack: see ``Window/sendAxFrame(_:_:readBack:)``
-    func setAxFrame(_ windowId: OpaqueWindowId, _ topLeft: CGPoint?, _ size: CGSize?, readBack generation: UInt?) {
+    /// - Parameter readBack: see ``Window/sendAxFrame(_:_:readBack:fitting:)``
+    /// - Parameter fitting: the window is fitted into its tile here, on the thread of the app (see ``TileFitting``)
+    func setAxFrame(_ windowId: OpaqueWindowId, _ topLeft: CGPoint?, _ size: CGSize?, readBack generation: UInt?, fitting: TileFitting?) {
         setFrameJobs.removeValue(forKey: windowId)?.cancel()
         setFrameJobs[windowId] = withWindowAsync(windowId, .cancellable) { [axApp] window, job in
-            let isApplied = try disableAnimations(app: axApp.threadGuarded, job) {
-                try setFrame(window, topLeft, size, job)
+            let result: FrameJobResult = try disableAnimations(app: axApp.threadGuarded, job) {
+                guard try setFrame(window, topLeft, size, job) else { return .notApplied }
+                // What the app made of it, in the same job: it may refuse the size, or round it
+                guard generation != nil, let frame = try AppBundle::getAxRect(window: window, job: job) else { return .applied }
+                guard let fitting, let size else { return .readBack(frame, nil) }
+                return try fit(window, into: fitting, sent: size, at: topLeft, frame, job)
             }
-            if !isApplied { // E.g. the app is busy. Make the next layout send the frame again
-                Task.startUnstructured { @MainActor in Window.get(byId: windowId)?.invalidateSentFrame() }
-                return
+            switch result {
+                case .notApplied: // E.g. the app is busy. Make the next layout send the frame again
+                    Task.startUnstructured { @MainActor in Window.get(byId: windowId)?.invalidateSentFrame() }
+                case .applied: break
+                case .readBack(let frame, let fitted):
+                    guard let generation else { return }
+                    Task.startUnstructured { @MainActor in Window.get(byId: windowId)?.frameWasReadBack(frame, generation: generation, fitted: fitted) }
             }
-            // What the app made of it, in the same job: it may refuse the size
-            guard let generation, let frame = try AppBundle::getAxRect(window: window, job: job) else { return }
-            Task.startUnstructured { @MainActor in Window.get(byId: windowId)?.frameWasReadBack(frame, generation: generation) }
         }
     }
 
@@ -662,6 +668,46 @@ private func getAxRect(window: AXUIElement, job: RunLoopJob) throws -> Rect? {
     try job.checkCancellation()
     guard let size = window.get(Ax.sizeAttr) else { return nil }
     return Rect(topLeftX: topLeftCorner.x, topLeftY: topLeftCorner.y, width: size.width, height: size.height)
+}
+
+private enum FrameJobResult: Sendable {
+    /// An AX write failed
+    case notApplied
+    /// Nothing was read back
+    case applied
+    case readBack(Rect, FittedFrame?)
+}
+
+/// Asks the window for less while it rounds its tile up (see ``TileFitting/negotiate(sent:got:_:)``), and moves it to
+/// its place for what it took, if that's not where it was sent. Every ask is a write and a read of the size, on the
+/// thread of the app
+///
+/// - Parameter frame: read back after the frame was sent
+private func fit(
+    _ window: AXUIElement,
+    into fitting: TileFitting,
+    sent size: CGSize,
+    at topLeft: CGPoint?,
+    _ frame: Rect,
+    _ job: RunLoopJob,
+) throws -> FrameJobResult {
+    let start = ContinuousClock.now
+    let negotiation = try fitting.negotiate(sent: size, got: frame.size) { request in
+        try job.checkCancellation()
+        guard window.set(Ax.sizeAttr, request) else { return nil }
+        try job.checkCancellation()
+        return window.get(Ax.sizeAttr)
+    }
+    guard let negotiation else { return .notApplied }
+    let duration = ContinuousClock.now - start
+    AxStats.recordSizeFitting(asks: max(0, negotiation.answers.count - 1), duration: duration)
+    // The layout that sent the frame didn't know what the window makes of its tile: it's centered on it now
+    let placed = fitting.topLeft(for: negotiation.fit)
+    let fitted = FittedFrame(negotiation: negotiation, topLeft: placed, duration: duration)
+    guard placed != topLeft else { return .readBack(frame, fitted) }
+    try job.checkCancellation()
+    guard window.set(Ax.topLeftCornerAttr, placed) else { return .notApplied }
+    return .readBack(try AppBundle::getAxRect(window: window, job: job) ?? frame, fitted)
 }
 
 /// Returns false if any of the AX writes failed

@@ -195,7 +195,7 @@ final class MacWindow: Window {
         let p = topLeftHidden(in: width == nil ? .bottomRightCorner : corner, width: width ?? 0, of: nodeMonitorInfo.visibleRect)
         // Nothing on the screen deals with it until it's shown again. What it makes of the size of its tile is read back:
         // the layout knows it when the workspace is shown (App Store refuses to be narrower than 1000)
-        setAxFrame(p, tile, readBack: tile != nil)
+        setAxFrame(p, tile.map(request(forTile:)), readBack: tile != nil)
     }
 
     /// Where the top left corner of the window goes to hide it in `corner` of `visibleRect`, one pixel of it on the screen
@@ -248,8 +248,8 @@ final class MacWindow: Window {
         try await macApp.getAxSize(windowId, cm)
     }
 
-    override func sendAxFrame(_ topLeft: CGPoint?, _ size: CGSize?, readBack: UInt?) {
-        macApp.setAxFrame(windowId, topLeft, size, readBack: readBack)
+    override func sendAxFrame(_ topLeft: CGPoint?, _ size: CGSize?, readBack: UInt?, fitting: TileFitting?) {
+        macApp.setAxFrame(windowId, topLeft, size, readBack: readBack, fitting: fitting)
     }
 
     @MainActor override func getAxRect(_ cm: CancellationMode) async throws -> Rect? {

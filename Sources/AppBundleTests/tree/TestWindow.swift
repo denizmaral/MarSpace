@@ -12,7 +12,7 @@ final class TestWindow: Window, CustomStringConvertible {
     /// Terminal takes whole lines and characters: the size is rounded to whole cells of this size
     var characterGridForTest: CGSize? = nil
     /// The frames read back after sends, delivered by ``deliverReadBacksForTest()``. nil: delivered right away
-    var heldReadBacksForTest: [(frame: Rect, generation: UInt)]? = nil
+    var heldReadBacksForTest: [(frame: Rect, generation: UInt, fitted: FittedFrame?)]? = nil
     /// When the frames are read back. nil: now
     var readBackInstantForTest: ContinuousClock.Instant? = nil
     var isMacosFullscreenForTest = false
@@ -40,13 +40,40 @@ final class TestWindow: Window, CustomStringConvertible {
         TestApp.shared.focusedWindow = self
     }
 
-    /// Frames that actually reached the window (unchanged frames are filtered by ``Window/setAxFrame(_:_:readBack:)``)
+    /// Frames that actually reached the window (unchanged frames are filtered by ``Window/setAxFrame(_:_:readBack:fitting:)``)
     private(set) var sentFrames: [(topLeft: CGPoint?, size: CGSize?)] = []
 
-    override func sendAxFrame(_ topLeft: CGPoint?, _ size: CGSize?, readBack: UInt?) {
+    override func sendAxFrame(_ topLeft: CGPoint?, _ size: CGSize?, readBack: UInt?, fitting: TileFitting?) {
         sentFrames.append((topLeft, size))
         let origin = topLeft ?? axRectForTest?.topLeftCorner ?? .zero
-        var applied = size ?? axRectForTest?.size ?? .zero
+        var applied = apply(size ?? axRectForTest?.size ?? .zero)
+        var frame = Rect(topLeftX: origin.x, topLeftY: origin.y, width: applied.width, height: applied.height)
+        var fitted: FittedFrame? = nil
+        // Like the frame job of MacApp: the asks for less, and the place for what the window took
+        if readBack != nil, let fitting, let size, let negotiation = fitting.negotiate(sent: size, got: applied, { request in
+            sizeAsksForTest.append(request)
+            applied = apply(request)
+            return applied
+        }) {
+            let placed = fitting.topLeft(for: negotiation.fit)
+            frame = Rect(topLeftX: placed.x, topLeftY: placed.y, width: applied.width, height: applied.height)
+            fitted = FittedFrame(negotiation: negotiation, topLeft: placed, duration: .zero)
+        }
+        axRectForTest = frame
+        guard let readBack else { return }
+        if heldReadBacksForTest != nil {
+            heldReadBacksForTest?.append((frame, readBack, fitted))
+        } else {
+            frameWasReadBack(frame, generation: readBack, fitted: fitted, at: readBackInstantForTest ?? .now)
+        }
+    }
+
+    /// The sizes that the window was asked for after the first one of a frame, to fit into its tile (see ``TileFitting``)
+    private(set) var sizeAsksForTest: [CGSize] = []
+
+    /// What the app makes of `size`
+    private func apply(_ size: CGSize) -> CGSize {
+        var applied = size
         if let minimum = minimumSizeForTest {
             applied = CGSize(width: max(applied.width, minimum.width), height: max(applied.height, minimum.height))
         }
@@ -59,21 +86,14 @@ final class TestWindow: Window, CustomStringConvertible {
                 height: (applied.height / cell.height).rounded() * cell.height,
             )
         }
-        let frame = Rect(topLeftX: origin.x, topLeftY: origin.y, width: applied.width, height: applied.height)
-        axRectForTest = frame
-        guard let readBack else { return }
-        if heldReadBacksForTest != nil {
-            heldReadBacksForTest?.append((frame, readBack))
-        } else {
-            frameWasReadBack(frame, generation: readBack, at: readBackInstantForTest ?? .now)
-        }
+        return applied
     }
 
     @MainActor
     func deliverReadBacksForTest() {
         let readBacks = heldReadBacksForTest ?? []
         heldReadBacksForTest = []
-        for (frame, generation) in readBacks { frameWasReadBack(frame, generation: generation, at: readBackInstantForTest ?? .now) }
+        for (frame, generation, fitted) in readBacks { frameWasReadBack(frame, generation: generation, fitted: fitted, at: readBackInstantForTest ?? .now) }
     }
 
     override func closeAxWindow() {
