@@ -198,4 +198,25 @@ struct SizeFitTest {
         assertEquals(fit.height, .unsearched)
         assertEquals(negotiate(tile, known: fit, floorLines).fit.height, .roundedUp)
     }
+
+    /// The last answer that the asks allow is taken along both axes: 115 wide is refused, not the tile that the width
+    /// fitted before
+    @Test func testLastAnswerIsTaken() {
+        let tile = CGSize(width: 100, height: 100)
+        var answers = [CGSize(width: 102, height: 100), CGSize(width: 102, height: 100), CGSize(width: 102, height: 100), CGSize(width: 95, height: 100),
+                       CGSize(width: 100, height: 102), CGSize(width: 100, height: 102), CGSize(width: 100, height: 102), CGSize(width: 100, height: 95),
+                       CGSize(width: 115, height: 102)]
+        let negotiation = negotiate(tile) { _ in answers.isEmpty ? CGSize(width: 115, height: 102) : answers.removeFirst() }
+        assertEquals(negotiation.fit.got.width, 115)
+        assertEquals(negotiation.fit.width, .refused)
+        assertEquals(negotiation.fit.isBiggerThanTile, true)
+    }
+
+    /// The request that is remembered is one that the window answered with what it took, along both axes
+    @Test func testRememberedRequestIsAWholeOne() {
+        let tile = CGSize(width: 100, height: 100)
+        let app: (CGSize) -> CGSize = { $0.width < 100 ? CGSize(width: 102, height: 100) : CGSize(width: $0.width, height: 95) }
+        let negotiation = negotiate(tile, app)
+        assertEquals(app(negotiation.fit.request), negotiation.fit.got)
+    }
 }
